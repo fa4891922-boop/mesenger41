@@ -373,10 +373,30 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
+  position: relative;
 }
 
 .conversation-item:hover { background: rgba(255, 255, 255, 0.04); }
 .conversation-item.active { background: var(--accent-soft); }
+
+.conv-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.conversation-item:hover .conv-delete-btn { opacity: 1; }
+.conv-delete-btn:hover { color: var(--danger); background: rgba(255, 71, 87, 0.1); }
 
 .conversation-info { flex: 1; min-width: 0; }
 
@@ -514,6 +534,22 @@
 .chat-messages::-webkit-scrollbar { width: 5px; }
 .chat-messages::-webkit-scrollbar-track { background: transparent; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 10px; }
+
+.date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0 6px;
+}
+
+.date-separator span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-bubble-other);
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+}
 
 .message {
   display: flex;

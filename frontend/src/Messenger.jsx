@@ -9,6 +9,17 @@ function formatTime(timestamp) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDate(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  const now = new Date();
+  const diff = now - d;
+  const dayMs = 86400000;
+  if (diff < dayMs && d.getDate() === now.getDate()) return 'Сегодня';
+  if (diff < dayMs * 2 && d.getDate() === now.getDate() - 1) return 'Вчера';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
 function Messenger({ token, user, onLogout }) {
   const [socket, setSocket] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -25,12 +36,16 @@ function Messenger({ token, user, onLogout }) {
   const [editText, setEditText] = useState('');
   const [chatMenu, setChatMenu] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
-  const [convContextMenu, setConvContextMenu] = useState(null);
   const chatRef = useRef(null);
   const typingTimeout = useRef(null);
   const editInputRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const closeAllMenus = useCallback(() => {
+    setContextMenu(null);
+    setChatMenu(false);
+  }, []);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -45,55 +60,50 @@ function Messenger({ token, user, onLogout }) {
   useEffect(() => {
     const s = io(BACKEND_URL, { auth: { token } });
     setSocket(s);
-
     s.on('online_users', (users) => setOnlineUsers(users));
-
     return () => s.disconnect();
   }, [token]);
 
   useEffect(() => {
-    if (socket) {
-      socket.off('receive_message');
-      socket.off('message_deleted');
-      socket.off('message_edited');
-      socket.off('user_typing');
+    if (!socket) return;
+    socket.off('receive_message');
+    socket.off('message_deleted');
+    socket.off('message_edited');
+    socket.off('user_typing');
 
-      socket.on('receive_message', (msg) => {
-        if (activeChat &&
-          (msg.sender_id === activeChat.id || msg.receiver_id === activeChat.id)) {
-          setMessages(prev => [...prev, msg]);
-        }
-        loadConversations();
-      });
+    socket.on('receive_message', (msg) => {
+      if (activeChat &&
+        (msg.sender_id === activeChat.id || msg.receiver_id === activeChat.id)) {
+        setMessages(prev => [...prev, msg]);
+      }
+      loadConversations();
+    });
 
-      socket.on('message_deleted', (data) => {
-        if (data.forEveryone) {
-          setMessages(prev => prev.filter(m => m.id !== data.messageId));
-        }
-      });
+    socket.on('message_deleted', (data) => {
+      if (data.forEveryone) {
+        setMessages(prev => prev.filter(m => m.id !== data.messageId));
+      }
+    });
 
-      socket.on('message_edited', (updated) => {
-        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m));
-      });
+    socket.on('message_edited', (updated) => {
+      setMessages(prev => prev.map(m =>
+        m.id === updated.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
+      ));
+    });
 
-      socket.on('user_typing', (data) => {
-        if (activeChat && data.userId === activeChat.id) {
-          setTyping(data.userId);
-          clearTimeout(typingTimeout.current);
-          typingTimeout.current = setTimeout(() => setTyping(null), 2000);
-        }
-      });
-    }
+    socket.on('user_typing', (data) => {
+      if (activeChat && data.userId === activeChat.id) {
+        setTyping(data.userId);
+        clearTimeout(typingTimeout.current);
+        typingTimeout.current = setTimeout(() => setTyping(null), 2000);
+      }
+    });
   }, [activeChat, socket, loadConversations]);
 
-  useEffect(() => {
-    loadConversations();
-  }, [token, loadConversations]);
+  useEffect(() => { loadConversations(); }, [token, loadConversations]);
 
   useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
@@ -104,14 +114,10 @@ function Messenger({ token, user, onLogout }) {
   }, [editingMessage]);
 
   useEffect(() => {
-    const handleClick = () => {
-      setContextMenu(null);
-      setChatMenu(false);
-      setConvContextMenu(null);
-    };
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, []);
+    const handler = () => closeAllMenus();
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [closeAllMenus]);
 
   const searchUsers = async (query) => {
     setSearch(query);
@@ -131,8 +137,7 @@ function Messenger({ token, user, onLogout }) {
     setSearch('');
     setAllUsers([]);
     setEditingMessage(null);
-    setContextMenu(null);
-    setChatMenu(false);
+    closeAllMenus();
     try {
       const res = await fetch(`${BACKEND_URL}/api/messages/${chatUser.id}`, { headers });
       const data = await res.json();
@@ -158,62 +163,56 @@ function Messenger({ token, user, onLogout }) {
 
   const isOnline = (userId) => onlineUsers.includes(userId);
 
-  const handleContextMenu = (e, msg) => {
+  const showContextMenu = (e, msg) => {
     e.preventDefault();
     e.stopPropagation();
     const isOwn = msg.sender_id === user.id;
-    let x = e.clientX;
-    let y = e.clientY;
+    let x = e.clientX || e.currentTarget.getBoundingClientRect().right;
+    let y = e.clientY || e.currentTarget.getBoundingClientRect().top;
     if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
-    if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+    if (y + 180 > window.innerHeight) y = window.innerHeight - 190;
+    if (x < 10) x = 10;
     setContextMenu({ x, y, message: msg, isOwn });
   };
 
-  const handleMsgActionClick = (e, msg) => {
+  const showMsgMenu = (e, msg) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const isOwn = msg.sender_id === user.id;
     let x = isOwn ? rect.left - 190 : rect.right + 10;
     let y = rect.top;
     if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
-    if (x < 0) x = 10;
-    if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+    if (x < 10) x = 10;
+    if (y + 180 > window.innerHeight) y = window.innerHeight - 190;
     setContextMenu({ x, y, message: msg, isOwn });
   };
 
-  const handleConvContextMenu = (e, conv) => {
-    e.preventDefault();
-    e.stopPropagation();
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
-    if (y + 60 > window.innerHeight) y = window.innerHeight - 70;
-    setConvContextMenu({ x, y, conv });
-  };
-
   const deleteMessage = async (msg, forEveryone) => {
+    closeAllMenus();
     try {
-      await fetch(`${BACKEND_URL}/api/messages/${msg.id}`, {
+      const res = await fetch(`${BACKEND_URL}/api/messages/${msg.id}`, {
         method: 'DELETE',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ forEveryone })
       });
-      if (forEveryone) {
+      if (res.ok) {
         setMessages(prev => prev.filter(m => m.id !== msg.id));
-      } else {
-        setMessages(prev => prev.filter(m => m.id !== msg.id));
+        loadConversations();
       }
-      loadConversations();
     } catch (err) {
       console.error(err);
     }
-    setContextMenu(null);
+  };
+
+  const copyMessage = (msg) => {
+    navigator.clipboard.writeText(msg.content).catch(() => {});
+    closeAllMenus();
   };
 
   const startEdit = (msg) => {
     setEditingMessage(msg);
     setEditText(msg.content);
-    setContextMenu(null);
+    closeAllMenus();
   };
 
   const saveEdit = async () => {
@@ -224,8 +223,12 @@ function Messenger({ token, user, onLogout }) {
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editText.trim() })
       });
-      const updated = await res.json();
-      setMessages(prev => prev.map(m => m.id === editingMessage.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m));
+      if (res.ok) {
+        const updated = await res.json();
+        setMessages(prev => prev.map(m =>
+          m.id === editingMessage.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
+        ));
+      }
     } catch (err) {
       console.error(err);
     }
@@ -238,29 +241,46 @@ function Messenger({ token, user, onLogout }) {
     setEditText('');
   };
 
-  const deleteConversation = async (targetUserId) => {
-    const userId = targetUserId || confirmDialog?.userId || activeChat?.id;
-    if (!userId) return;
+  const requestDeleteChat = (userId, name) => {
+    closeAllMenus();
+    setConfirmDialog({ type: 'deleteChat', userId, name });
+  };
+
+  const deleteConversation = async () => {
+    if (!confirmDialog?.userId) return;
+    const userId = confirmDialog.userId;
     try {
-      await fetch(`${BACKEND_URL}/api/conversations/${userId}`, {
+      const res = await fetch(`${BACKEND_URL}/api/conversations/${userId}`, {
         method: 'DELETE',
         headers
       });
-      if (activeChat?.id === userId) {
-        setActiveChat(null);
-        setMessages([]);
+      if (res.ok) {
+        if (activeChat?.id === userId) {
+          setActiveChat(null);
+          setMessages([]);
+        }
+        loadConversations();
       }
-      loadConversations();
     } catch (err) {
       console.error(err);
     }
     setConfirmDialog(null);
-    setChatMenu(false);
-    setConvContextMenu(null);
+  };
+
+  const renderDateSeparator = (current, prev) => {
+    if (!current.created_at) return null;
+    const curDate = new Date(current.created_at).toDateString();
+    const prevDate = prev ? new Date(prev.created_at).toDateString() : null;
+    if (curDate === prevDate) return null;
+    return (
+      <div className="date-separator">
+        <span>{formatDate(current.created_at)}</span>
+      </div>
+    );
   };
 
   return (
-    <div className="messenger-layout" onClick={() => { setContextMenu(null); setChatMenu(false); }}>
+    <div className="messenger-layout" onClick={closeAllMenus}>
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-brand">
@@ -319,7 +339,6 @@ function Messenger({ token, user, onLogout }) {
                 key={c.id}
                 className={`conversation-item ${activeChat?.id === c.id ? 'active' : ''}`}
                 onClick={() => openChat(c)}
-                onContextMenu={(e) => handleConvContextMenu(e, c)}
               >
                 <div className={`user-avatar ${isOnline(c.id) ? 'online' : ''}`}>
                   {c.display_name[0].toUpperCase()}
@@ -331,6 +350,19 @@ function Messenger({ token, user, onLogout }) {
                   </div>
                   <p className="conversation-preview">{c.last_message}</p>
                 </div>
+                <button
+                  className="conv-delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestDeleteChat(c.id, c.display_name);
+                  }}
+                  title="Удалить чат"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
               </div>
             ))
           )}
@@ -382,7 +414,10 @@ function Messenger({ token, user, onLogout }) {
                 </button>
                 {chatMenu && (
                   <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
-                    <button className="dropdown-item danger" onClick={() => setConfirmDialog({ type: 'deleteChat', userId: activeChat.id, name: activeChat.display_name })}>
+                    <button
+                      className="dropdown-item danger"
+                      onClick={() => requestDeleteChat(activeChat.id, activeChat.display_name)}
+                    >
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="3 6 5 6 21 6" />
                         <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
@@ -398,54 +433,57 @@ function Messenger({ token, user, onLogout }) {
               {messages.map((m, i) => {
                 const isOwn = m.sender_id === user.id;
                 const isEditing = editingMessage?.id === m.id;
+                const prev = i > 0 ? messages[i - 1] : null;
                 return (
-                  <div
-                    key={m.id || i}
-                    className={`message ${isOwn ? 'own' : 'other'}`}
-                    onContextMenu={(e) => handleContextMenu(e, m)}
-                  >
-                    <div className="message-bubble">
-                      {isEditing ? (
-                        <div className="edit-inline">
-                          <input
-                            ref={editInputRef}
-                            type="text"
-                            className="edit-input"
-                            value={editText}
-                            onChange={e => setEditText(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') saveEdit();
-                              if (e.key === 'Escape') cancelEdit();
-                            }}
-                          />
-                          <div className="edit-actions">
-                            <button className="edit-save" onClick={saveEdit}>✓</button>
-                            <button className="edit-cancel" onClick={cancelEdit}>✕</button>
+                  <div key={m.id || i}>
+                    {renderDateSeparator(m, prev)}
+                    <div
+                      className={`message ${isOwn ? 'own' : 'other'}`}
+                      onContextMenu={(e) => showContextMenu(e, m)}
+                    >
+                      <div className="message-bubble">
+                        {isEditing ? (
+                          <div className="edit-inline">
+                            <input
+                              ref={editInputRef}
+                              type="text"
+                              className="edit-input"
+                              value={editText}
+                              onChange={e => setEditText(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveEdit();
+                                if (e.key === 'Escape') cancelEdit();
+                              }}
+                            />
+                            <div className="edit-actions">
+                              <button className="edit-save" onClick={saveEdit}>✓</button>
+                              <button className="edit-cancel" onClick={cancelEdit}>✕</button>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="message-text">{m.content}</p>
-                          <span className="message-meta">
-                            {m.edited_at && <span className="edited-label">ред.</span>}
-                            <span className="message-time-inline">{formatTime(m.created_at)}</span>
-                          </span>
-                        </>
+                        ) : (
+                          <>
+                            <p className="message-text">{m.content}</p>
+                            <span className="message-meta">
+                              {m.edited_at && <span className="edited-label">ред.</span>}
+                              <span className="message-time-inline">{formatTime(m.created_at)}</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {!isEditing && (
+                        <button
+                          className="msg-action-btn"
+                          onClick={(e) => showMsgMenu(e, m)}
+                          aria-label="Действия"
+                        >
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                            <circle cx="12" cy="6" r="1.5" />
+                            <circle cx="12" cy="12" r="1.5" />
+                            <circle cx="12" cy="18" r="1.5" />
+                          </svg>
+                        </button>
                       )}
                     </div>
-                    {!isEditing && (
-                      <button
-                        className="msg-action-btn"
-                        onClick={(e) => handleMsgActionClick(e, m)}
-                        aria-label="Действия"
-                      >
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                          <circle cx="12" cy="6" r="1.5" />
-                          <circle cx="12" cy="12" r="1.5" />
-                          <circle cx="12" cy="18" r="1.5" />
-                        </svg>
-                      </button>
-                    )}
                   </div>
                 );
               })}
@@ -482,6 +520,13 @@ function Messenger({ token, user, onLogout }) {
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button className="context-item" onClick={() => copyMessage(contextMenu.message)}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+            Копировать
+          </button>
           {contextMenu.isOwn && (
             <button className="context-item" onClick={() => startEdit(contextMenu.message)}>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
@@ -512,36 +557,15 @@ function Messenger({ token, user, onLogout }) {
         </div>
       )}
 
-      {convContextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: convContextMenu.y, left: convContextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="context-item danger" onClick={() => {
-            setConfirmDialog({ type: 'deleteChat', userId: convContextMenu.conv.id, name: convContextMenu.conv.display_name });
-            setConvContextMenu(null);
-          }}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            </svg>
-            Удалить чат
-          </button>
-        </div>
-      )}
-
       {confirmDialog && (
         <div className="confirm-overlay" onClick={() => setConfirmDialog(null)}>
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <p className="confirm-text">
-              {confirmDialog.type === 'deleteChat'
-                ? `Удалить чат с ${confirmDialog.name}? Сообщения будут удалены только у вас.`
-                : 'Вы уверены?'}
+              Удалить чат с {confirmDialog.name}? Сообщения будут удалены только у вас.
             </p>
             <div className="confirm-actions">
               <button className="confirm-btn cancel" onClick={() => setConfirmDialog(null)}>Отмена</button>
-              <button className="confirm-btn delete" onClick={() => deleteConversation(confirmDialog.userId)}>Удалить</button>
+              <button className="confirm-btn delete" onClick={deleteConversation}>Удалить</button>
             </div>
           </div>
         </div>
