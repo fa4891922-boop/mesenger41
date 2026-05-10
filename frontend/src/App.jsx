@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
+import './App.css';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 const socket = io(BACKEND_URL);
+
+function formatTime(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [username, setUsername] = useState('User' + Math.floor(Math.random() * 1000));
+  const chatRef = useRef(null);
 
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/messages`)
@@ -24,6 +32,12 @@ function App() {
     return () => socket.off('receive_message');
   }, []);
 
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const sendMessage = (e) => {
     e.preventDefault();
     if (message.trim()) {
@@ -33,38 +47,66 @@ function App() {
   };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto', background: '#f5f5f5', minHeight: '100vh' }}>
-      <div style={{ background: 'white', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
-        <h1 style={{ color: '#0088cc', margin: '0 0 20px 0' }}>💬 Telegram Clone</h1>
-        <div style={{ marginBottom: '15px' }}>
-          <input 
-            type="text" 
-            value={username} 
+    <div className="messenger">
+      <header className="messenger-header">
+        <div className="header-brand">
+          <span className="header-logo">🍐</span>
+          <h1>PearNet</h1>
+        </div>
+        <div className="header-status">
+          <span className="status-dot" />
+          <span>online</span>
+        </div>
+        <div className="header-user">
+          <span className="header-user-label">ник</span>
+          <input
+            type="text"
+            className="username-input"
+            value={username}
             onChange={e => setUsername(e.target.value)}
             placeholder="Ваше имя"
-            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box' }}
           />
         </div>
-        <div style={{ height: '400px', border: '1px solid #eee', borderRadius: '5px', overflowY: 'auto', padding: '15px', marginBottom: '15px', background: '#fafafa' }}>
-          {messages.map((m, i) => (
-            <div key={i} style={{ marginBottom: '10px', padding: '8px 12px', background: m.username === username ? '#e3f2fd' : 'white', borderRadius: '15px', display: 'inline-block', maxWidth: '80%', clear: 'both', float: m.username === username ? 'right' : 'left', border: '1px solid #eee' }}>
-              <strong style={{ color: m.username === username ? '#1565c0' : '#d32f2f', fontSize: '0.8em', display: 'block', marginBottom: '2px' }}>{m.username}</strong> 
-              <span>{m.content}</span>
+      </header>
+
+      <main className="messenger-chat" ref={chatRef}>
+        {messages.length === 0 ? (
+          <div className="chat-empty">
+            <span className="chat-empty-icon">🍐</span>
+            <span className="chat-empty-text">Пока нет сообщений</span>
+            <span className="chat-empty-hint">Напишите первое!</span>
+          </div>
+        ) : (
+          messages.map((m, i) => (
+            <div
+              key={m.id || i}
+              className={`message ${m.username === username ? 'own' : 'other'}`}
+            >
+              <span className="message-author">{m.username}</span>
+              <div className="message-bubble">
+                <p className="message-text">{m.content}</p>
+              </div>
+              <span className="message-time">{formatTime(m.created_at)}</span>
             </div>
-          ))}
-          <div style={{ clear: 'both' }}></div>
-        </div>
-        <form onSubmit={sendMessage} style={{ display: 'flex', gap: '10px' }}>
-          <input 
-            type="text" 
-            value={message} 
-            onChange={e => setMessage(e.target.value)} 
-            placeholder="Написать сообщение..."
-            style={{ flexGrow: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd', outline: 'none' }}
-          />
-          <button type="submit" style={{ padding: '10px 20px', borderRadius: '20px', border: 'none', background: '#0088cc', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>Отправить</button>
-        </form>
-      </div>
+          ))
+        )}
+      </main>
+
+      <form className="messenger-input" onSubmit={sendMessage}>
+        <input
+          type="text"
+          className="message-field"
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          placeholder="Написать сообщение..."
+          autoComplete="off"
+        />
+        <button type="submit" className="send-btn" aria-label="Отправить">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+      </form>
     </div>
   );
 }
