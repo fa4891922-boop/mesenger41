@@ -560,17 +560,32 @@
 .message.own .message-text { color: var(--text-on-accent); font-weight: 500; }
 .message.other .message-text { color: var(--text-primary); }
 
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
 .message-time-inline {
   font-size: 10px;
   white-space: nowrap;
-  flex-shrink: 0;
-  align-self: flex-end;
   line-height: 1;
   margin-bottom: 1px;
 }
 
 .message.own .message-time-inline { color: rgba(11, 26, 14, 0.45); }
 .message.other .message-time-inline { color: var(--text-muted); }
+
+.edited-label {
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.message.own .edited-label { color: rgba(11, 26, 14, 0.45); }
+.message.other .edited-label { color: var(--text-muted); }
 
 /* ═══ CHAT INPUT ═══ */
 
@@ -624,6 +639,236 @@
 .send-btn:hover { transform: scale(1.08); box-shadow: 0 4px 20px rgba(83, 215, 105, 0.4); }
 .send-btn:active { transform: scale(0.95); }
 .send-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+/* ═══ CHAT HEADER ACTIONS ═══ */
+
+.chat-header-actions {
+  margin-left: auto;
+  position: relative;
+}
+
+.chat-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chat-menu-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  min-width: 180px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  box-shadow: var(--shadow-md);
+  z-index: 100;
+  animation: menuIn 0.15s var(--ease-out);
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.dropdown-item:hover { background: rgba(255, 255, 255, 0.06); }
+.dropdown-item.danger { color: var(--danger); }
+.dropdown-item.danger:hover { background: rgba(255, 71, 87, 0.1); }
+
+/* ═══ CONTEXT MENU ═══ */
+
+.context-menu {
+  position: fixed;
+  min-width: 180px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  box-shadow: var(--shadow-md);
+  z-index: 200;
+  animation: menuIn 0.15s var(--ease-out);
+}
+
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.context-item:hover { background: rgba(255, 255, 255, 0.06); }
+.context-item.danger { color: var(--danger); }
+.context-item.danger:hover { background: rgba(255, 71, 87, 0.1); }
+
+/* ═══ EDIT INLINE ═══ */
+
+.edit-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.edit-input {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  outline: none;
+  width: 100%;
+}
+
+.edit-input:focus {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.edit-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.edit-save, .edit-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+
+.edit-save {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.edit-save:hover { transform: scale(1.1); }
+
+.edit-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.edit-cancel:hover { background: rgba(255, 71, 87, 0.15); color: var(--danger); }
+
+/* ═══ CONFIRM DIALOG ═══ */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  animation: fadeIn 0.2s var(--ease-out);
+}
+
+.confirm-dialog {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: var(--shadow-md);
+  animation: menuIn 0.2s var(--ease-out);
+}
+
+.confirm-text {
+  font-family: var(--font);
+  font-size: 14.5px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.confirm-btn {
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.confirm-btn.cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.confirm-btn.cancel:hover { background: rgba(255, 255, 255, 0.12); }
+
+.confirm-btn.delete {
+  background: var(--danger);
+  color: #fff;
+}
+
+.confirm-btn.delete:hover { background: #e84050; transform: translateY(-1px); }
+
+/* ═══ MESSAGE HOVER ═══ */
+
+.message {
+  cursor: default;
+}
+
+.message .message-bubble {
+  position: relative;
+}
 
 /* ═══════════════════════════════
    RESPONSIVE
