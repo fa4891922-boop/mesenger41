@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(git add *)",
+      "Bash(git remote *)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+
+  "git push to any branch is allowed by the user"
+    ]
+  }
+}
