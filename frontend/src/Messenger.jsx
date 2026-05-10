@@ -25,6 +25,7 @@ function Messenger({ token, user, onLogout }) {
   const [editText, setEditText] = useState('');
   const [chatMenu, setChatMenu] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [convContextMenu, setConvContextMenu] = useState(null);
   const chatRef = useRef(null);
   const typingTimeout = useRef(null);
   const editInputRef = useRef(null);
@@ -106,6 +107,7 @@ function Messenger({ token, user, onLogout }) {
     const handleClick = () => {
       setContextMenu(null);
       setChatMenu(false);
+      setConvContextMenu(null);
     };
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
@@ -159,14 +161,34 @@ function Messenger({ token, user, onLogout }) {
   const handleContextMenu = (e, msg) => {
     e.preventDefault();
     e.stopPropagation();
+    const isOwn = msg.sender_id === user.id;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+    if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+    setContextMenu({ x, y, message: msg, isOwn });
+  };
+
+  const handleMsgActionClick = (e, msg) => {
+    e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const isOwn = msg.sender_id === user.id;
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      message: msg,
-      isOwn
-    });
+    let x = isOwn ? rect.left - 190 : rect.right + 10;
+    let y = rect.top;
+    if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+    if (x < 0) x = 10;
+    if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+    setContextMenu({ x, y, message: msg, isOwn });
+  };
+
+  const handleConvContextMenu = (e, conv) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+    if (y + 60 > window.innerHeight) y = window.innerHeight - 70;
+    setConvContextMenu({ x, y, conv });
   };
 
   const deleteMessage = async (msg, forEveryone) => {
@@ -216,21 +238,25 @@ function Messenger({ token, user, onLogout }) {
     setEditText('');
   };
 
-  const deleteConversation = async () => {
-    if (!activeChat) return;
+  const deleteConversation = async (targetUserId) => {
+    const userId = targetUserId || confirmDialog?.userId || activeChat?.id;
+    if (!userId) return;
     try {
-      await fetch(`${BACKEND_URL}/api/conversations/${activeChat.id}`, {
+      await fetch(`${BACKEND_URL}/api/conversations/${userId}`, {
         method: 'DELETE',
         headers
       });
-      setActiveChat(null);
-      setMessages([]);
+      if (activeChat?.id === userId) {
+        setActiveChat(null);
+        setMessages([]);
+      }
       loadConversations();
     } catch (err) {
       console.error(err);
     }
     setConfirmDialog(null);
     setChatMenu(false);
+    setConvContextMenu(null);
   };
 
   return (
@@ -293,6 +319,7 @@ function Messenger({ token, user, onLogout }) {
                 key={c.id}
                 className={`conversation-item ${activeChat?.id === c.id ? 'active' : ''}`}
                 onClick={() => openChat(c)}
+                onContextMenu={(e) => handleConvContextMenu(e, c)}
               >
                 <div className={`user-avatar ${isOnline(c.id) ? 'online' : ''}`}>
                   {c.display_name[0].toUpperCase()}
@@ -355,7 +382,7 @@ function Messenger({ token, user, onLogout }) {
                 </button>
                 {chatMenu && (
                   <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
-                    <button className="dropdown-item danger" onClick={() => setConfirmDialog({ type: 'deleteChat' })}>
+                    <button className="dropdown-item danger" onClick={() => setConfirmDialog({ type: 'deleteChat', userId: activeChat.id, name: activeChat.display_name })}>
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="3 6 5 6 21 6" />
                         <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
@@ -376,12 +403,6 @@ function Messenger({ token, user, onLogout }) {
                     key={m.id || i}
                     className={`message ${isOwn ? 'own' : 'other'}`}
                     onContextMenu={(e) => handleContextMenu(e, m)}
-                    onClick={(e) => {
-                      if (window.innerWidth <= 768) {
-                        e.stopPropagation();
-                        handleContextMenu(e, m);
-                      }
-                    }}
                   >
                     <div className="message-bubble">
                       {isEditing ? (
@@ -412,6 +433,19 @@ function Messenger({ token, user, onLogout }) {
                         </>
                       )}
                     </div>
+                    {!isEditing && (
+                      <button
+                        className="msg-action-btn"
+                        onClick={(e) => handleMsgActionClick(e, m)}
+                        aria-label="Действия"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                          <circle cx="12" cy="6" r="1.5" />
+                          <circle cx="12" cy="12" r="1.5" />
+                          <circle cx="12" cy="18" r="1.5" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -478,17 +512,36 @@ function Messenger({ token, user, onLogout }) {
         </div>
       )}
 
+      {convContextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: convContextMenu.y, left: convContextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button className="context-item danger" onClick={() => {
+            setConfirmDialog({ type: 'deleteChat', userId: convContextMenu.conv.id, name: convContextMenu.conv.display_name });
+            setConvContextMenu(null);
+          }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+            Удалить чат
+          </button>
+        </div>
+      )}
+
       {confirmDialog && (
         <div className="confirm-overlay" onClick={() => setConfirmDialog(null)}>
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <p className="confirm-text">
               {confirmDialog.type === 'deleteChat'
-                ? `Удалить чат с ${activeChat?.display_name}? Сообщения будут удалены только у вас.`
+                ? `Удалить чат с ${confirmDialog.name}? Сообщения будут удалены только у вас.`
                 : 'Вы уверены?'}
             </p>
             <div className="confirm-actions">
               <button className="confirm-btn cancel" onClick={() => setConfirmDialog(null)}>Отмена</button>
-              <button className="confirm-btn delete" onClick={deleteConversation}>Удалить</button>
+              <button className="confirm-btn delete" onClick={() => deleteConversation(confirmDialog.userId)}>Удалить</button>
             </div>
           </div>
         </div>

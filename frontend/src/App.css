@@ -519,10 +519,35 @@
   display: flex;
   max-width: 65%;
   animation: messageIn 0.3s var(--ease-spring) both;
+  align-items: center;
+  gap: 4px;
 }
 
-.message.own { align-self: flex-end; }
+.message.own { align-self: flex-end; flex-direction: row-reverse; }
 .message.other { align-self: flex-start; }
+
+.msg-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.message:hover .msg-action-btn { opacity: 1; }
+.msg-action-btn:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.06); }
+
+@media (max-width: 768px) {
+  .msg-action-btn { opacity: 1; }
+}
 
 @keyframes messageIn {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
@@ -859,16 +884,6 @@
 }
 
 .confirm-btn.delete:hover { background: #e84050; transform: translateY(-1px); }
-
-/* ═══ MESSAGE HOVER ═══ */
-
-.message {
-  cursor: default;
-}
-
-.message .message-bubble {
-  position: relative;
-}
 
 /* ═══════════════════════════════
    RESPONSIVE
