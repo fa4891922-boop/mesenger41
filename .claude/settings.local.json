@@ -16,7 +16,10 @@
       "Bash(git init *)",
       "Bash(git checkout *)",
       "Bash(git add *)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "mcp__github__get_me",
+      "mcp__render__list_services",
+      "mcp__render__get_selected_workspace"
     ]
   }
 }
