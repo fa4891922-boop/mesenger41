@@ -511,10 +511,11 @@ function Messenger({ token, user, onLogout }) {
                 return (
                   <div key={m.id || i}>
                     {renderDateSeparator(m, prev)}
-                    <div
-                      className={`message ${isOwn ? 'own' : 'other'}${m._optimistic ? ' optimistic' : ''}`}
-                      onContextMenu={(e) => showContextMenu(e, m)}
-                    >
+                    <div className={`message-row ${isOwn ? 'own' : 'other'}`}>
+                      <div
+                        className={`message ${isOwn ? 'own' : 'other'}${m._optimistic ? ' optimistic' : ''}`}
+                        onContextMenu={(e) => showContextMenu(e, m)}
+                      >
                       <div className="message-bubble">
                         {isEditing ? (
                           <div className="edit-inline">
@@ -557,6 +558,7 @@ function Messenger({ token, user, onLogout }) {
                           </svg>
                         </button>
                       )}
+                    </div>
                     </div>
                   </div>
                 );
