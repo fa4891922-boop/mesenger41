@@ -1,12 +1,28 @@
 const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
+const http = require('http');
 
 const PROD_URL = 'https://pearnet-frontend.onrender.com';
 const DEV_URL = 'http://localhost:5173';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-function createWindow() {
+function waitForVite(url, retries = 30) {
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      http.get(url, (res) => {
+        resolve();
+      }).on('error', () => {
+        if (retries <= 0) return reject(new Error('Vite not ready'));
+        retries--;
+        setTimeout(attempt, 500);
+      });
+    };
+    attempt();
+  });
+}
+
+async function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
@@ -29,7 +45,12 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  win.loadURL(isDev ? DEV_URL : PROD_URL);
+  if (isDev) {
+    await waitForVite(DEV_URL).catch(() => {});
+    win.loadURL(DEV_URL);
+  } else {
+    win.loadURL(PROD_URL);
+  }
 
   win.setMenuBarVisibility(false);
 }
@@ -45,3 +66,4 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+

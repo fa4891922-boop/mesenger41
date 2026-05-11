@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "NODE_ENV=development electron .",
+    "dev": "concurrently --kill-others \"cd ../frontend && npm run dev\" \"NODE_ENV=development electron .\"",
     "build:linux": "electron-builder --linux",
     "build:win": "electron-builder --win",
     "build": "electron-builder --linux --win"
@@ -21,11 +21,16 @@
       "icon.png"
     ],
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Network"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "icon.png"
     },
     "nsis": {
@@ -37,6 +42,7 @@
   "author": "PearNet",
   "license": "MIT",
   "devDependencies": {
+    "concurrently": "^8.2.2",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   }
