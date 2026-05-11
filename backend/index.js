@@ -85,21 +85,6 @@ const authenticate = (req, res, next) => {
 
 app.get('/', (req, res) => res.send('PearNet API is running!'));
 
-app.post('/api/_setup_admin_once', async (req, res) => {
-  if (req.headers['x-setup-key'] !== 'pearnet-setup-2026') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    await pool.query('TRUNCATE private_messages, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('Admin2026!', 10);
-    const result = await pool.query(
-      'INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name',
-      ['admin', hash, 'Admin']
-    );
-    res.json({ ok: true, user: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.post('/api/register', async (req, res) => {
   const { username, password, displayName } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
