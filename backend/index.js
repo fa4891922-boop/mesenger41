@@ -311,6 +311,48 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('call_offer', (data) => {
+    const receiverSocketId = onlineUsers.get(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('call_incoming', {
+        from: socket.user.id,
+        fromName: socket.user.displayName || socket.user.username,
+        offer: data.offer,
+        callType: data.callType,
+      });
+    } else {
+      socket.emit('call_rejected', { reason: 'offline' });
+    }
+  });
+
+  socket.on('call_answer', (data) => {
+    const callerSocketId = onlineUsers.get(data.to);
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call_answered', { answer: data.answer });
+    }
+  });
+
+  socket.on('call_ice', (data) => {
+    const targetSocketId = onlineUsers.get(data.to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call_ice', { candidate: data.candidate });
+    }
+  });
+
+  socket.on('call_end', (data) => {
+    const targetSocketId = onlineUsers.get(data.to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call_ended');
+    }
+  });
+
+  socket.on('call_reject', (data) => {
+    const callerSocketId = onlineUsers.get(data.to);
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call_rejected', { reason: 'declined' });
+    }
+  });
+
   socket.on('disconnect', () => {
     onlineUsers.delete(socket.user.id);
     pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1', [socket.user.id]).catch(() => {});

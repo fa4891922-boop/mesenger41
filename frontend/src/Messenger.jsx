@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
+import CallModal from './CallModal.jsx';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
@@ -20,6 +21,16 @@ function formatDate(timestamp) {
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return isMobile;
+}
+
 function Messenger({ token, user, onLogout }) {
   const [socket, setSocket] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -30,15 +41,20 @@ function Messenger({ token, user, onLogout }) {
   const [search, setSearch] = useState('');
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [typing, setTyping] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState('');
   const [chatMenu, setChatMenu] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [activeCall, setActiveCall] = useState(null);
   const chatRef = useRef(null);
   const typingTimeout = useRef(null);
   const editInputRef = useRef(null);
+  const activeChatRef = useRef(null);
+  const isMobile = useIsMobile();
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -58,47 +74,58 @@ function Messenger({ token, user, onLogout }) {
   }, [token]);
 
   useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
+  useEffect(() => {
     const s = io(BACKEND_URL, { auth: { token } });
     setSocket(s);
     s.on('online_users', (users) => setOnlineUsers(users));
-    return () => s.disconnect();
-  }, [token]);
 
-  useEffect(() => {
-    if (!socket) return;
-    socket.off('receive_message');
-    socket.off('message_deleted');
-    socket.off('message_edited');
-    socket.off('user_typing');
+    s.on('call_incoming', (data) => {
+      setActiveCall({ incoming: true, ...data });
+    });
 
-    socket.on('receive_message', (msg) => {
-      if (activeChat &&
-        (msg.sender_id === activeChat.id || msg.receiver_id === activeChat.id)) {
-        setMessages(prev => [...prev, msg]);
+    s.on('receive_message', (msg) => {
+      const current = activeChatRef.current;
+      if (current && (msg.sender_id === current.id || msg.receiver_id === current.id)) {
+        setMessages(prev => {
+          const optimisticIdx = prev.findIndex(m => m._optimistic &&
+            m.sender_id === msg.sender_id && m.content === msg.content);
+          if (optimisticIdx !== -1) {
+            const next = [...prev];
+            next[optimisticIdx] = msg;
+            return next;
+          }
+          return [...prev, msg];
+        });
       }
       loadConversations();
     });
 
-    socket.on('message_deleted', (data) => {
+    s.on('message_deleted', (data) => {
       if (data.forEveryone) {
         setMessages(prev => prev.filter(m => m.id !== data.messageId));
       }
     });
 
-    socket.on('message_edited', (updated) => {
+    s.on('message_edited', (updated) => {
       setMessages(prev => prev.map(m =>
         m.id === updated.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
       ));
     });
 
-    socket.on('user_typing', (data) => {
-      if (activeChat && data.userId === activeChat.id) {
+    s.on('user_typing', (data) => {
+      const current = activeChatRef.current;
+      if (current && data.userId === current.id) {
         setTyping(data.userId);
         clearTimeout(typingTimeout.current);
         typingTimeout.current = setTimeout(() => setTyping(null), 2000);
       }
     });
-  }, [activeChat, socket, loadConversations]);
+
+    return () => s.disconnect();
+  }, [token]);
 
   useEffect(() => { loadConversations(); }, [token, loadConversations]);
 
@@ -134,10 +161,12 @@ function Messenger({ token, user, onLogout }) {
   const openChat = async (chatUser) => {
     setActiveChat(chatUser);
     setShowSearch(false);
+    setShowMobileSearch(false);
     setSearch('');
     setAllUsers([]);
     setEditingMessage(null);
     closeAllMenus();
+    if (isMobile) setShowSidebar(false);
     try {
       const res = await fetch(`${BACKEND_URL}/api/messages/${chatUser.id}`, { headers });
       const data = await res.json();
@@ -150,7 +179,17 @@ function Messenger({ token, user, onLogout }) {
   const sendMessage = (e) => {
     e.preventDefault();
     if (message.trim() && activeChat && socket) {
-      socket.emit('send_message', { receiverId: activeChat.id, content: message });
+      const optimistic = {
+        _optimistic: true,
+        id: `opt_${Date.now()}`,
+        sender_id: user.id,
+        receiver_id: activeChat.id,
+        content: message.trim(),
+        created_at: new Date().toISOString(),
+        sender_name: user.display_name || user.username,
+      };
+      setMessages(prev => [...prev, optimistic]);
+      socket.emit('send_message', { receiverId: activeChat.id, content: message.trim() });
       setMessage('');
     }
   };
@@ -281,7 +320,7 @@ function Messenger({ token, user, onLogout }) {
 
   return (
     <div className="messenger-layout" onClick={closeAllMenus}>
-      <aside className="sidebar">
+      <aside className={`sidebar${isMobile && !showSidebar ? ' sidebar-hidden' : ''}${isMobile && showSidebar ? ' sidebar-mobile' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <span className="header-logo">🍐</span>
@@ -289,7 +328,16 @@ function Messenger({ token, user, onLogout }) {
           </div>
           <button
             className="sidebar-search-btn"
-            onClick={(e) => { e.stopPropagation(); setShowSearch(!showSearch); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isMobile) {
+                setSearch('');
+                setAllUsers([]);
+                setShowMobileSearch(true);
+              } else {
+                setShowSearch(!showSearch);
+              }
+            }}
             title="Найти пользователя"
           >
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
@@ -385,10 +433,17 @@ function Messenger({ token, user, onLogout }) {
         </div>
       </aside>
 
-      <main className="chat-area">
+      <main className={`chat-area${isMobile && showSidebar ? ' chat-area-hidden' : ''}`}>
         {activeChat ? (
           <>
             <div className="chat-header">
+              {isMobile && (
+                <button className="back-btn" onClick={() => setShowSidebar(true)} aria-label="Назад">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+              )}
               <div className={`user-avatar sm ${isOnline(activeChat.id) ? 'online' : ''}`}>
                 {activeChat.display_name[0].toUpperCase()}
               </div>
@@ -401,6 +456,25 @@ function Messenger({ token, user, onLogout }) {
                 </span>
               </div>
               <div className="chat-header-actions">
+                <button
+                  className="chat-menu-btn"
+                  onClick={(e) => { e.stopPropagation(); setActiveCall({ incoming: false, callType: 'audio' }); }}
+                  title="Голосовой звонок"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8a19.79 19.79 0 01-3.07-8.63A2 2 0 012 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.9a16 16 0 006.29 6.29l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
+                  </svg>
+                </button>
+                <button
+                  className="chat-menu-btn"
+                  onClick={(e) => { e.stopPropagation(); setActiveCall({ incoming: false, callType: 'video' }); }}
+                  title="Видеозвонок"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                </button>
                 <button
                   className="chat-menu-btn"
                   onClick={(e) => { e.stopPropagation(); setChatMenu(!chatMenu); }}
@@ -438,7 +512,7 @@ function Messenger({ token, user, onLogout }) {
                   <div key={m.id || i}>
                     {renderDateSeparator(m, prev)}
                     <div
-                      className={`message ${isOwn ? 'own' : 'other'}`}
+                      className={`message ${isOwn ? 'own' : 'other'}${m._optimistic ? ' optimistic' : ''}`}
                       onContextMenu={(e) => showContextMenu(e, m)}
                     >
                       <div className="message-bubble">
@@ -470,7 +544,7 @@ function Messenger({ token, user, onLogout }) {
                           </>
                         )}
                       </div>
-                      {!isEditing && (
+                      {!isEditing && !m._optimistic && (
                         <button
                           className="msg-action-btn"
                           onClick={(e) => showMsgMenu(e, m)}
@@ -513,6 +587,42 @@ function Messenger({ token, user, onLogout }) {
           </div>
         )}
       </main>
+
+      {showMobileSearch && (
+        <div className="mobile-search-overlay" onClick={() => setShowMobileSearch(false)}>
+          <div className="mobile-search-panel" onClick={e => e.stopPropagation()}>
+            <div className="mobile-search-header">
+              <button className="mobile-search-close" onClick={() => setShowMobileSearch(false)}>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Найти по имени..."
+                value={search}
+                onChange={e => searchUsers(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="search-results">
+              {allUsers.map(u => (
+                <div key={u.id} className="user-item" onClick={() => openChat(u)}>
+                  <div className={`user-avatar ${isOnline(u.id) ? 'online' : ''}`}>
+                    {u.display_name[0].toUpperCase()}
+                  </div>
+                  <div className="user-info">
+                    <span className="user-name">{u.display_name}</span>
+                    <span className="user-username">@{u.username}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {contextMenu && (
         <div
@@ -569,6 +679,15 @@ function Messenger({ token, user, onLogout }) {
             </div>
           </div>
         </div>
+      )}
+      {activeCall && (
+        <CallModal
+          socket={socket}
+          user={user}
+          activeChat={activeChat}
+          call={activeCall}
+          onClose={() => setActiveCall(null)}
+        />
       )}
     </div>
   );

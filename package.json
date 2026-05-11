@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "postinstall": "cd backend && npm install",
-    "start": "cd backend && npm start"
+    "start": "cd backend && npm start",
+    "desktop": "cd desktop && npm install && npm run dev",
+    "desktop:build": "cd desktop && npm install && npm run build"
   }
 }
