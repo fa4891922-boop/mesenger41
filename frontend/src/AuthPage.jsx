@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiFetch, readJsonResponse } from './utils/api.js';
 
 function AuthPage({ onAuth }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -7,8 +8,6 @@ function AuthPage({ onAuth }) {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,12 +20,12 @@ function AuthPage({ onAuth }) {
       : { username, password, displayName: displayName || username };
 
     try {
-      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+      const res = await apiFetch(endpoint, null, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));

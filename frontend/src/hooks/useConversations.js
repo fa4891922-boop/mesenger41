@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { apiFetch } from '../utils/api';
+import { apiFetch, readJsonResponse } from '../utils/api';
 
 export default function useConversations(token) {
   const [conversations, setConversations] = useState([]);
@@ -10,7 +10,7 @@ export default function useConversations(token) {
   const loadConversations = useCallback(async () => {
     try {
       const res = await apiFetch('/api/conversations', token);
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (Array.isArray(data)) setConversations(data);
     } catch (err) {
       console.error(err);
@@ -24,7 +24,7 @@ export default function useConversations(token) {
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const res = await apiFetch(`/api/users?search=${encodeURIComponent(query)}`, token);
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         if (Array.isArray(data)) setAllUsers(data);
       } catch (err) {
         console.error(err);

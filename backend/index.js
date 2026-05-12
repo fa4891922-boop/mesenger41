@@ -22,9 +22,22 @@ const logger = require('./diagnostics/logger');
 const requestId = require('./middleware/requestId');
 const apiLogger = require('./middleware/apiLogger');
 
+const MOBILE_ORIGINS = ['https://localhost', 'http://localhost', 'capacitor://localhost', 'ionic://localhost'];
+const configuredOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([...configuredOrigins, ...MOBILE_ORIGINS]);
+const corsOrigin = configuredOrigins.length === 0 || configuredOrigins.includes('*')
+  ? '*'
+  : (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
+    };
+
 const app = express();
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '50kb' }));
 app.use(requestId);
 app.use(apiLogger);
@@ -40,7 +53,7 @@ app.use('/api/', rateLimit({
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || '*',
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
   },
 });
@@ -72,7 +85,8 @@ setupSocket(io, onlineUsers, redisClient);
 logger.info('startup', 'server_initializing', {
   metadata: {
     env: process.env.NODE_ENV || 'not_set',
-    corsOpen: !process.env.FRONTEND_URL || process.env.FRONTEND_URL === '*',
+    corsOpen: corsOrigin === '*',
+    corsOrigins: corsOrigin === '*' ? ['*'] : [...allowedOrigins],
     redisConfigured: !!process.env.REDIS_URL,
     nvidiaConfigured: !!process.env.NVIDIA_API_KEY,
     adminTokenConfigured: !!process.env.ADMIN_DIAGNOSTICS_TOKEN,

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetch, readJsonResponse } from './utils/api.js';
 import './AdminDiagnostics.css';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 const DEFAULT_CONFIG = {
   includeBackendLogs: true,
@@ -120,21 +119,21 @@ function AdminDiagnostics({ token, onBack }) {
 
   const loadHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/diagnostics/health`, { headers: headers() });
-      if (res.ok) setHealth(await res.json());
+      const res = await apiFetch('/api/admin/diagnostics/health', token, { headers: headers() });
+      if (res.ok) setHealth(await readJsonResponse(res));
     } catch { /* network error */ }
-  }, [headers]);
+  }, [headers, token]);
 
   const loadLogs = useCallback(async () => {
     try {
       const area = logFilter !== 'all' ? `&area=${logFilter}` : '';
-      const res = await fetch(`${BACKEND_URL}/api/admin/diagnostics/logs?limit=100${area}`, { headers: headers() });
+      const res = await apiFetch(`/api/admin/diagnostics/logs?limit=100${area}`, token, { headers: headers() });
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         setLogs(data.logs || []);
       }
     } catch { /* network error */ }
-  }, [headers, logFilter]);
+  }, [headers, logFilter, token]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -144,16 +143,16 @@ function AdminDiagnostics({ token, onBack }) {
 
   useEffect(() => {
     const h = headers();
-    fetch(`${BACKEND_URL}/api/admin/diagnostics/health`, { headers: h })
-      .then(res => res.ok ? res.json() : null)
+    apiFetch('/api/admin/diagnostics/health', token, { headers: h })
+      .then(res => res.ok ? readJsonResponse(res) : null)
       .then(data => { if (data) setHealth(data); })
       .catch(() => { /* network error */ });
     const area = logFilter !== 'all' ? `&area=${logFilter}` : '';
-    fetch(`${BACKEND_URL}/api/admin/diagnostics/logs?limit=100${area}`, { headers: h })
-      .then(res => res.ok ? res.json() : null)
+    apiFetch(`/api/admin/diagnostics/logs?limit=100${area}`, token, { headers: h })
+      .then(res => res.ok ? readJsonResponse(res) : null)
       .then(data => { if (data) setLogs(data.logs || []); })
       .catch(() => { /* network error */ });
-  }, [headers, logFilter]);
+  }, [headers, logFilter, token]);
 
   const copyDiagnostics = async () => {
     setCopyStatus('loading');
@@ -162,7 +161,7 @@ function AdminDiagnostics({ token, onBack }) {
       for (const [key, val] of Object.entries(config)) {
         params.set(key, String(val));
       }
-      const res = await fetch(`${BACKEND_URL}/api/admin/diagnostics/bundle?${params}`, { headers: headers() });
+      const res = await apiFetch(`/api/admin/diagnostics/bundle?${params}`, token, { headers: headers() });
       if (!res.ok) throw new Error('Failed');
       const text = await res.text();
       try {
@@ -182,12 +181,12 @@ function AdminDiagnostics({ token, onBack }) {
     setAiLoading(true);
     setAiResult(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/diagnostics/ai-analyze`, {
+      const res = await apiFetch('/api/admin/diagnostics/ai-analyze', token, {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify({ config }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       setAiResult(data.analysis || data.error || 'No result');
     } catch (err) {
       setAiResult('Error: ' + err.message);

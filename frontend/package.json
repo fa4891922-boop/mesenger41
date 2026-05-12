@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "android:sync:debug": "vite build --mode android-debug && cap sync android",
+    "android:sync:release": "node scripts/require-backend-url.mjs && vite build --mode production && cap sync android",
+    "android:open": "cap open android",
     "lint": "eslint .",
     "preview": "vite preview"
   },

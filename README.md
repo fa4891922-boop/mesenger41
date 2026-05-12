@@ -41,6 +41,28 @@ npm install
 npm start
 ```
 
+## Android APK
+
+For local emulator testing, keep the backend running on your computer at `http://localhost:3000` and run:
+
+```bash
+cd frontend
+npm run android:sync:debug
+npm run android:open
+```
+
+For a real release APK, configure the public backend URL first:
+
+```bash
+cd frontend
+cp .env.production.example .env.production
+# edit .env.production if your backend URL changes
+npm run android:sync:release
+npm run android:open
+```
+
+Then build the APK/AAB from Android Studio. Do not use `localhost`, `127.0.0.1`, or `10.0.2.2` for release builds.
+
 ## Environment Variables
 
 ### Backend (`backend/.env`)

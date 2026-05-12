@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { apiFetch } from '../utils/api';
+import { apiFetch, readJsonResponse } from '../utils/api';
 import { diagLog } from '../utils/diagnostics';
 
 export default function useMessages(token, socket, user, activeChat, onConversationUpdate) {
@@ -33,7 +33,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
       editInputRef.current.focus();
       editInputRef.current.setSelectionRange(editText.length, editText.length);
     }
-  }, [editingMessage]);
+  }, [editingMessage, editText.length]);
 
   useEffect(() => {
     if (!socket) return;
@@ -93,7 +93,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     setLoadingMessages(true);
     try {
       const res = await apiFetch(`/api/messages/${chatUser.id}?limit=50`, token);
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       setMessages(data.messages || []);
       setHasMore(data.hasMore || false);
     } catch (err) {
@@ -113,7 +113,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     const prevHeight = scrollEl?.scrollHeight || 0;
     try {
       const res = await apiFetch(`/api/messages/${activeChatRef.current.id}?limit=50&before=${firstMsg.id}`, token);
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       const older = data.messages || [];
       setHasMore(data.hasMore || false);
       if (older.length > 0) {
@@ -205,7 +205,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
         body: JSON.stringify({ content: editText.trim() }),
       });
       if (res.ok) {
-        const updated = await res.json();
+        const updated = await readJsonResponse(res);
         setMessages(prev => prev.map(m =>
           m.id === editingMessage.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
         ));

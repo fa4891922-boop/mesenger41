@@ -2,5 +2,7 @@ node_modules/
 dist/
 .env
 android/.gradle/
+android/.idea/
 android/app/build/
 android/build/
+android/gradle/gradle-daemon-jvm.properties

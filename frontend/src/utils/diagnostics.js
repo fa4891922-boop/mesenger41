@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+import { BACKEND_URL } from './api';
 const MAX_BUFFER = 200;
 
 const buffer = [];

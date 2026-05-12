@@ -3,9 +3,8 @@ import AuthPage from './AuthPage.jsx';
 import Messenger from './Messenger.jsx';
 import AdminDiagnostics from './AdminDiagnostics.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import { apiFetch, readJsonResponse } from './utils/api.js';
 import './App.css';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -31,12 +30,10 @@ function App() {
 
   useEffect(() => {
     if (token) {
-      fetch(`${BACKEND_URL}/api/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      apiFetch('/api/me', token)
         .then(res => {
           if (!res.ok) throw new Error('Invalid token');
-          return res.json();
+          return readJsonResponse(res);
         })
         .then(data => setUser(data))
         .catch(() => handleLogout())
