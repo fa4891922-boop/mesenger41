@@ -1,0 +1,13 @@
+{
+  "appId": "com.pearnet.messenger",
+  "appName": "PearNet",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}
