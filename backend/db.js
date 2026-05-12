@@ -34,7 +34,8 @@ async function initDb() {
     { table: 'private_messages', col: 'edited_at', type: 'TIMESTAMP' },
     { table: 'private_messages', col: 'deleted_for_sender', type: 'BOOLEAN DEFAULT FALSE' },
     { table: 'private_messages', col: 'deleted_for_receiver', type: 'BOOLEAN DEFAULT FALSE' },
-    { table: 'users', col: 'last_seen', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' }
+    { table: 'users', col: 'last_seen', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
+    { table: 'users', col: 'is_admin', type: 'BOOLEAN DEFAULT FALSE' },
   ];
   for (const { table, col, type } of cols) {
     await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${type}`).catch(() => {});

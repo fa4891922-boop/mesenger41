@@ -19,7 +19,7 @@ function useIsMobile() {
   return isMobile;
 }
 
-function Messenger({ token, user, onLogout }) {
+function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
   const { socket, connectionStatus, onlineUsers } = useSocket(token);
   const {
     conversations, setConversations, loadConversations,
@@ -181,6 +181,7 @@ function Messenger({ token, user, onLogout }) {
         requestDeleteChat={requestDeleteChat}
         user={user}
         onLogout={onLogout}
+        onOpenDiagnostics={onOpenDiagnostics}
         isMobile={isMobile}
         showSidebar={showSidebar}
       />

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import AuthPage from './AuthPage.jsx';
 import Messenger from './Messenger.jsx';
+import AdminDiagnostics from './AdminDiagnostics.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import './App.css';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
@@ -12,6 +14,7 @@ function App() {
     return stored ? JSON.parse(stored) : null;
   });
   const [loading, setLoading] = useState(() => !!localStorage.getItem('token'));
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const handleAuth = (newToken, newUser) => {
     setToken(newToken);
@@ -23,6 +26,7 @@ function App() {
     localStorage.removeItem('user');
     setToken(null);
     setUser(null);
+    setShowDiagnostics(false);
   };
 
   useEffect(() => {
@@ -50,10 +54,31 @@ function App() {
   }
 
   if (!token || !user) {
-    return <AuthPage onAuth={handleAuth} />;
+    return (
+      <ErrorBoundary>
+        <AuthPage onAuth={handleAuth} />
+      </ErrorBoundary>
+    );
   }
 
-  return <Messenger token={token} user={user} onLogout={handleLogout} />;
+  if (showDiagnostics) {
+    return (
+      <ErrorBoundary>
+        <AdminDiagnostics token={token} onBack={() => setShowDiagnostics(false)} />
+      </ErrorBoundary>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <Messenger
+        token={token}
+        user={user}
+        onLogout={handleLogout}
+        onOpenDiagnostics={user.is_admin ? () => setShowDiagnostics(true) : null}
+      />
+    </ErrorBoundary>
+  );
 }
 
 export default App;

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { apiFetch } from '../utils/api';
+import { diagLog } from '../utils/diagnostics';
 
 export default function useMessages(token, socket, user, activeChat, onConversationUpdate) {
   const [messages, setMessages] = useState([]);
@@ -146,6 +147,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     };
     setMessages(prev => [...prev, optimistic]);
     setMessage('');
+    diagLog('message-flow', 'send_started', { tempId, receiverId: activeChatRef.current.id, contentLength: optimistic.content.length });
     setTimeout(() => {
       setMessages(prev => prev.map(m =>
         m.id === tempId && m._status === 'sending' ? { ...m, _status: 'failed' } : m
@@ -168,6 +170,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
   };
 
   const deleteMessage = async (msg, forEveryone) => {
+    diagLog('delete-flow', 'delete_started', { messageId: msg.id, forEveryone });
     try {
       const res = await apiFetch(`/api/messages/${msg.id}`, token, {
         method: 'DELETE',
@@ -176,9 +179,13 @@ export default function useMessages(token, socket, user, activeChat, onConversat
       });
       if (res.ok) {
         setMessages(prev => prev.filter(m => m.id !== msg.id));
+        diagLog('delete-flow', 'delete_success', { messageId: msg.id });
+      } else {
+        diagLog('delete-flow', 'delete_api_failed', { messageId: msg.id, status: res.status });
       }
       return res.ok;
     } catch (err) {
+      diagLog('delete-flow', 'delete_error', { messageId: msg.id, error: err.message });
       console.error(err);
       return false;
     }
