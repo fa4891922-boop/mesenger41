@@ -1074,3 +1074,120 @@
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.06);
 }
+
+/* ═══ CONNECTION BANNER ═══ */
+
+.connection-banner {
+  text-align: center;
+  padding: 8px;
+  background: rgba(255, 71, 87, 0.15);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(255, 71, 87, 0.2);
+  flex-shrink: 0;
+  animation: fadeIn 0.3s var(--ease-out);
+}
+
+/* ═══ FAILED MESSAGE ═══ */
+
+.message.failed { opacity: 0.5; }
+.message.failed .message-bubble {
+  border: 1px dashed var(--danger);
+}
+
+.retry-btn {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--danger);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  text-decoration: underline;
+  margin-top: 2px;
+}
+
+.retry-btn:hover {
+  color: #ff6b7a;
+}
+
+/* ═══ DISABLED STATES ═══ */
+
+.send-btn:disabled,
+.message-field:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ═══ APP LOADING ═══ */
+
+.app-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg-deep);
+  font-family: var(--font);
+}
+
+.app-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.app-loading-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: -0.5px;
+}
+
+/* ═══ CHAT LOADING & EMPTY ═══ */
+
+.chat-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  gap: 4px;
+}
+
+.chat-empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ═══ LOAD MORE ═══ */
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}

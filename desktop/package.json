@@ -29,9 +29,10 @@
     },
     "win": {
       "target": [
-        "nsis"
+        { "target": "zip", "arch": ["x64"] }
       ],
-      "icon": "icon.png"
+      "icon": "icon.png",
+      "sign": null
     },
     "nsis": {
       "oneClick": false,
@@ -39,7 +40,11 @@
     }
   },
   "keywords": [],
-  "author": "PearNet",
+  "author": {
+    "name": "PearNet",
+    "email": "fa4891922@gmail.com"
+  },
+  "homepage": "https://pearnet-frontend.onrender.com",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2",

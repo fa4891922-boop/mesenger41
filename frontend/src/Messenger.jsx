@@ -1,25 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client';
+import { useState, useEffect, useCallback } from 'react';
+import useSocket from './hooks/useSocket';
+import useConversations from './hooks/useConversations';
+import useMessages from './hooks/useMessages';
+import Sidebar from './components/Sidebar';
+import ChatArea from './components/ChatArea';
+import ContextMenu from './components/ContextMenu';
+import ConfirmDialog from './components/ConfirmDialog';
+import SearchOverlay from './components/SearchOverlay';
 import CallModal from './CallModal.jsx';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
-
-function formatTime(timestamp) {
-  if (!timestamp) return '';
-  const d = new Date(timestamp);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDate(timestamp) {
-  if (!timestamp) return '';
-  const d = new Date(timestamp);
-  const now = new Date();
-  const diff = now - d;
-  const dayMs = 86400000;
-  if (diff < dayMs && d.getDate() === now.getDate()) return 'Сегодня';
-  if (diff < dayMs * 2 && d.getDate() === now.getDate() - 1) return 'Вчера';
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
@@ -32,113 +20,61 @@ function useIsMobile() {
 }
 
 function Messenger({ token, user, onLogout }) {
-  const [socket, setSocket] = useState(null);
-  const [conversations, setConversations] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
+  const { socket, connectionStatus, onlineUsers } = useSocket(token);
+  const {
+    conversations, setConversations, loadConversations,
+    search, setSearch, allUsers, setAllUsers, searchUsers,
+    deleteChat,
+  } = useConversations(token);
+
   const [activeChat, setActiveChat] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [message, setMessage] = useState('');
-  const [search, setSearch] = useState('');
-  const [onlineUsers, setOnlineUsers] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
-  const [typing, setTyping] = useState(null);
-  const [contextMenu, setContextMenu] = useState(null);
-  const [editingMessage, setEditingMessage] = useState(null);
-  const [editText, setEditText] = useState('');
-  const [chatMenu, setChatMenu] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
-  const chatRef = useRef(null);
-  const typingTimeout = useRef(null);
-  const editInputRef = useRef(null);
-  const activeChatRef = useRef(null);
   const isMobile = useIsMobile();
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const handleNewMessage = useCallback((msg) => {
+    const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+    setConversations(prev => {
+      const existing = prev.find(c => c.id === otherUserId);
+      if (existing) {
+        return [
+          { ...existing, last_message: msg.content, last_message_at: msg.created_at },
+          ...prev.filter(c => c.id !== otherUserId),
+        ];
+      }
+      loadConversations();
+      return prev;
+    });
+  }, [user.id, setConversations, loadConversations]);
+
+  const {
+    messages, message, setMessage,
+    editingMessage, editText, setEditText, editInputRef, chatRef,
+    typing, loadingMessages, hasMore, loadingOlder,
+    loadMessages, loadOlderMessages, sendMessage, retryMessage, deleteMessage,
+    startEdit, saveEdit, cancelEdit, handleTyping,
+  } = useMessages(token, socket, user, activeChat, handleNewMessage);
+
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleCallIncoming = (data) => setActiveCall({ incoming: true, ...data });
+    socket.on('call_incoming', handleCallIncoming);
+    return () => socket.off('call_incoming', handleCallIncoming);
+  }, [socket]);
+
+  useEffect(() => {
+    if (connectionStatus === 'connected') loadConversations();
+  }, [connectionStatus, loadConversations]);
 
   const closeAllMenus = useCallback(() => {
     setContextMenu(null);
-    setChatMenu(false);
   }, []);
-
-  const loadConversations = useCallback(async () => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/conversations`, { headers });
-      const data = await res.json();
-      if (Array.isArray(data)) setConversations(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    activeChatRef.current = activeChat;
-  }, [activeChat]);
-
-  useEffect(() => {
-    const s = io(BACKEND_URL, { auth: { token } });
-    setSocket(s);
-    s.on('online_users', (users) => setOnlineUsers(users));
-
-    s.on('call_incoming', (data) => {
-      setActiveCall({ incoming: true, ...data });
-    });
-
-    s.on('receive_message', (msg) => {
-      const current = activeChatRef.current;
-      if (current && (msg.sender_id === current.id || msg.receiver_id === current.id)) {
-        setMessages(prev => {
-          const optimisticIdx = prev.findIndex(m => m._optimistic &&
-            m.sender_id === msg.sender_id && m.content === msg.content);
-          if (optimisticIdx !== -1) {
-            const next = [...prev];
-            next[optimisticIdx] = msg;
-            return next;
-          }
-          return [...prev, msg];
-        });
-      }
-      loadConversations();
-    });
-
-    s.on('message_deleted', (data) => {
-      if (data.forEveryone) {
-        setMessages(prev => prev.filter(m => m.id !== data.messageId));
-      }
-    });
-
-    s.on('message_edited', (updated) => {
-      setMessages(prev => prev.map(m =>
-        m.id === updated.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
-      ));
-    });
-
-    s.on('user_typing', (data) => {
-      const current = activeChatRef.current;
-      if (current && data.userId === current.id) {
-        setTyping(data.userId);
-        clearTimeout(typingTimeout.current);
-        typingTimeout.current = setTimeout(() => setTyping(null), 2000);
-      }
-    });
-
-    return () => s.disconnect();
-  }, [token]);
-
-  useEffect(() => { loadConversations(); }, [token, loadConversations]);
-
-  useEffect(() => {
-    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
-  }, [messages]);
-
-  useEffect(() => {
-    if (editingMessage && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.setSelectionRange(editText.length, editText.length);
-    }
-  }, [editingMessage]);
 
   useEffect(() => {
     const handler = () => closeAllMenus();
@@ -146,17 +82,7 @@ function Messenger({ token, user, onLogout }) {
     return () => document.removeEventListener('click', handler);
   }, [closeAllMenus]);
 
-  const searchUsers = async (query) => {
-    setSearch(query);
-    if (!query.trim()) { setAllUsers([]); return; }
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/users?search=${encodeURIComponent(query)}`, { headers });
-      const data = await res.json();
-      if (Array.isArray(data)) setAllUsers(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const isOnline = (userId) => onlineUsers.includes(userId);
 
   const openChat = async (chatUser) => {
     setActiveChat(chatUser);
@@ -164,43 +90,10 @@ function Messenger({ token, user, onLogout }) {
     setShowMobileSearch(false);
     setSearch('');
     setAllUsers([]);
-    setEditingMessage(null);
     closeAllMenus();
     if (isMobile) setShowSidebar(false);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/messages/${chatUser.id}`, { headers });
-      const data = await res.json();
-      if (Array.isArray(data)) setMessages(data);
-    } catch (err) {
-      console.error(err);
-    }
+    await loadMessages(chatUser);
   };
-
-  const sendMessage = (e) => {
-    e.preventDefault();
-    if (message.trim() && activeChat && socket) {
-      const optimistic = {
-        _optimistic: true,
-        id: `opt_${Date.now()}`,
-        sender_id: user.id,
-        receiver_id: activeChat.id,
-        content: message.trim(),
-        created_at: new Date().toISOString(),
-        sender_name: user.display_name || user.username,
-      };
-      setMessages(prev => [...prev, optimistic]);
-      socket.emit('send_message', { receiverId: activeChat.id, content: message.trim() });
-      setMessage('');
-    }
-  };
-
-  const handleTyping = () => {
-    if (activeChat && socket) {
-      socket.emit('typing', { receiverId: activeChat.id });
-    }
-  };
-
-  const isOnline = (userId) => onlineUsers.includes(userId);
 
   const showContextMenu = (e, msg) => {
     e.preventDefault();
@@ -226,21 +119,26 @@ function Messenger({ token, user, onLogout }) {
     setContextMenu({ x, y, message: msg, isOwn });
   };
 
-  const deleteMessage = async (msg, forEveryone) => {
+  const requestDeleteChat = (userId, name) => {
     closeAllMenus();
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/messages/${msg.id}`, {
-        method: 'DELETE',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forEveryone })
-      });
-      if (res.ok) {
-        setMessages(prev => prev.filter(m => m.id !== msg.id));
+    setConfirmDialog({ type: 'deleteChat', userId, name });
+  };
+
+  const confirmAction = async () => {
+    if (!confirmDialog) return;
+    if (confirmDialog.type === 'deleteChat') {
+      const ok = await deleteChat(confirmDialog.userId);
+      if (ok) {
+        if (activeChat?.id === confirmDialog.userId) {
+          setActiveChat(null);
+        }
         loadConversations();
       }
-    } catch (err) {
-      console.error(err);
+    } else if (confirmDialog.type === 'deleteMessageForEveryone') {
+      await deleteMessage(confirmDialog.message, true);
+      loadConversations();
     }
+    setConfirmDialog(null);
   };
 
   const copyMessage = (msg) => {
@@ -248,440 +146,105 @@ function Messenger({ token, user, onLogout }) {
     closeAllMenus();
   };
 
-  const startEdit = (msg) => {
-    setEditingMessage(msg);
-    setEditText(msg.content);
+  const handleEdit = (msg) => {
+    startEdit(msg);
     closeAllMenus();
   };
 
-  const saveEdit = async () => {
-    if (!editText.trim() || !editingMessage) return;
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/messages/${editingMessage.id}`, {
-        method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: editText.trim() })
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setMessages(prev => prev.map(m =>
-          m.id === editingMessage.id ? { ...m, content: updated.content, edited_at: updated.edited_at } : m
-        ));
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setEditingMessage(null);
-    setEditText('');
-  };
-
-  const cancelEdit = () => {
-    setEditingMessage(null);
-    setEditText('');
-  };
-
-  const requestDeleteChat = (userId, name) => {
+  const handleDeleteForMe = (msg) => {
+    deleteMessage(msg, false);
     closeAllMenus();
-    setConfirmDialog({ type: 'deleteChat', userId, name });
   };
 
-  const deleteConversation = async () => {
-    if (!confirmDialog?.userId) return;
-    const userId = confirmDialog.userId;
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/conversations/${userId}`, {
-        method: 'DELETE',
-        headers
-      });
-      if (res.ok) {
-        if (activeChat?.id === userId) {
-          setActiveChat(null);
-          setMessages([]);
-        }
-        loadConversations();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setConfirmDialog(null);
-  };
-
-  const renderDateSeparator = (current, prev) => {
-    if (!current.created_at) return null;
-    const curDate = new Date(current.created_at).toDateString();
-    const prevDate = prev ? new Date(prev.created_at).toDateString() : null;
-    if (curDate === prevDate) return null;
-    return (
-      <div className="date-separator">
-        <span>{formatDate(current.created_at)}</span>
-      </div>
-    );
+  const handleDeleteForEveryone = (msg) => {
+    closeAllMenus();
+    setConfirmDialog({
+      type: 'deleteMessageForEveryone',
+      message: msg,
+      name: activeChat?.display_name,
+    });
   };
 
   return (
     <div className="messenger-layout" onClick={closeAllMenus}>
-      <aside className={`sidebar${isMobile && !showSidebar ? ' sidebar-hidden' : ''}${isMobile && showSidebar ? ' sidebar-mobile' : ''}`}>
-        <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <span className="header-logo">🍐</span>
-            <h1>PearNet</h1>
-          </div>
-          <button
-            className="sidebar-search-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isMobile) {
-                setSearch('');
-                setAllUsers([]);
-                setShowMobileSearch(true);
-              } else {
-                setShowSearch(!showSearch);
-              }
-            }}
-            title="Найти пользователя"
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </button>
-        </div>
+      <Sidebar
+        conversations={conversations}
+        activeChat={activeChat}
+        openChat={openChat}
+        isOnline={isOnline}
+        showSearch={showSearch}
+        setShowSearch={setShowSearch}
+        search={search}
+        searchUsers={searchUsers}
+        allUsers={allUsers}
+        setShowMobileSearch={setShowMobileSearch}
+        requestDeleteChat={requestDeleteChat}
+        user={user}
+        onLogout={onLogout}
+        isMobile={isMobile}
+        showSidebar={showSidebar}
+      />
 
-        {showSearch && (
-          <div className="sidebar-search">
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Найти по имени..."
-              value={search}
-              onChange={e => searchUsers(e.target.value)}
-              autoFocus
-            />
-            {allUsers.length > 0 && (
-              <div className="search-results">
-                {allUsers.map(u => (
-                  <div key={u.id} className="user-item" onClick={() => openChat(u)}>
-                    <div className={`user-avatar ${isOnline(u.id) ? 'online' : ''}`}>
-                      {u.display_name[0].toUpperCase()}
-                    </div>
-                    <div className="user-info">
-                      <span className="user-name">{u.display_name}</span>
-                      <span className="user-username">@{u.username}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+      <ChatArea
+        activeChat={activeChat}
+        messages={messages}
+        loadingMessages={loadingMessages}
+        hasMore={hasMore}
+        loadingOlder={loadingOlder}
+        loadOlderMessages={loadOlderMessages}
+        user={user}
+        typing={typing}
+        connectionStatus={connectionStatus}
+        isOnline={isOnline}
+        isMobile={isMobile}
+        showSidebar={showSidebar}
+        setShowSidebar={setShowSidebar}
+        message={message}
+        setMessage={setMessage}
+        sendMessage={sendMessage}
+        handleTyping={handleTyping}
+        editingMessage={editingMessage}
+        editText={editText}
+        setEditText={setEditText}
+        saveEdit={saveEdit}
+        cancelEdit={cancelEdit}
+        editInputRef={editInputRef}
+        chatRef={chatRef}
+        showContextMenu={showContextMenu}
+        showMsgMenu={showMsgMenu}
+        retryMessage={retryMessage}
+        requestDeleteChat={requestDeleteChat}
+        setActiveCall={setActiveCall}
+      />
 
-        <div className="conversations-list">
-          {conversations.length === 0 && !showSearch ? (
-            <div className="sidebar-empty">
-              <p>Нет диалогов</p>
-              <p className="sidebar-empty-hint">Найди друзей через поиск</p>
-            </div>
-          ) : (
-            conversations.map(c => (
-              <div
-                key={c.id}
-                className={`conversation-item ${activeChat?.id === c.id ? 'active' : ''}`}
-                onClick={() => openChat(c)}
-              >
-                <div className={`user-avatar ${isOnline(c.id) ? 'online' : ''}`}>
-                  {c.display_name[0].toUpperCase()}
-                </div>
-                <div className="conversation-info">
-                  <div className="conversation-top">
-                    <span className="conversation-name">{c.display_name}</span>
-                    <span className="conversation-time">{formatTime(c.last_message_at)}</span>
-                  </div>
-                  <p className="conversation-preview">{c.last_message}</p>
-                </div>
-                <button
-                  className="conv-delete-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestDeleteChat(c.id, c.display_name);
-                  }}
-                  title="Удалить чат"
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="user-avatar own online">
-              {user.display_name?.[0]?.toUpperCase() || user.username[0].toUpperCase()}
-            </div>
-            <span className="sidebar-user-name">{user.display_name || user.username}</span>
-          </div>
-          <button className="logout-btn" onClick={onLogout} title="Выйти">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
-        </div>
-      </aside>
-
-      <main className={`chat-area${isMobile && showSidebar ? ' chat-area-hidden' : ''}`}>
-        {activeChat ? (
-          <>
-            <div className="chat-header">
-              {isMobile && (
-                <button className="back-btn" onClick={() => setShowSidebar(true)} aria-label="Назад">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                </button>
-              )}
-              <div className={`user-avatar sm ${isOnline(activeChat.id) ? 'online' : ''}`}>
-                {activeChat.display_name[0].toUpperCase()}
-              </div>
-              <div className="chat-header-info">
-                <span className="chat-header-name">{activeChat.display_name}</span>
-                <span className="chat-header-status">
-                  {typing === activeChat.id
-                    ? 'печатает...'
-                    : isOnline(activeChat.id) ? 'в сети' : 'не в сети'}
-                </span>
-              </div>
-              <div className="chat-header-actions">
-                <button
-                  className="chat-menu-btn"
-                  onClick={(e) => { e.stopPropagation(); setActiveCall({ incoming: false, callType: 'audio' }); }}
-                  title="Голосовой звонок"
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8a19.79 19.79 0 01-3.07-8.63A2 2 0 012 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.9a16 16 0 006.29 6.29l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
-                  </svg>
-                </button>
-                <button
-                  className="chat-menu-btn"
-                  onClick={(e) => { e.stopPropagation(); setActiveCall({ incoming: false, callType: 'video' }); }}
-                  title="Видеозвонок"
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polygon points="23 7 16 12 23 17 23 7" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                  </svg>
-                </button>
-                <button
-                  className="chat-menu-btn"
-                  onClick={(e) => { e.stopPropagation(); setChatMenu(!chatMenu); }}
-                  title="Меню чата"
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                    <circle cx="12" cy="5" r="2" />
-                    <circle cx="12" cy="12" r="2" />
-                    <circle cx="12" cy="19" r="2" />
-                  </svg>
-                </button>
-                {chatMenu && (
-                  <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="dropdown-item danger"
-                      onClick={() => requestDeleteChat(activeChat.id, activeChat.display_name)}
-                    >
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                      </svg>
-                      Удалить чат
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="chat-messages" ref={chatRef}>
-              {messages.map((m, i) => {
-                const isOwn = m.sender_id === user.id;
-                const isEditing = editingMessage?.id === m.id;
-                const prev = i > 0 ? messages[i - 1] : null;
-                return (
-                  <div key={m.id || i}>
-                    {renderDateSeparator(m, prev)}
-                    <div className={`message-row ${isOwn ? 'own' : 'other'}`}>
-                      <div
-                        className={`message ${isOwn ? 'own' : 'other'}${m._optimistic ? ' optimistic' : ''}`}
-                        onContextMenu={(e) => showContextMenu(e, m)}
-                      >
-                      <div className="message-bubble">
-                        {isEditing ? (
-                          <div className="edit-inline">
-                            <input
-                              ref={editInputRef}
-                              type="text"
-                              className="edit-input"
-                              value={editText}
-                              onChange={e => setEditText(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') saveEdit();
-                                if (e.key === 'Escape') cancelEdit();
-                              }}
-                            />
-                            <div className="edit-actions">
-                              <button className="edit-save" onClick={saveEdit}>✓</button>
-                              <button className="edit-cancel" onClick={cancelEdit}>✕</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <p className="message-text">{m.content}</p>
-                            <span className="message-meta">
-                              {m.edited_at && <span className="edited-label">ред.</span>}
-                              <span className="message-time-inline">{formatTime(m.created_at)}</span>
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {!isEditing && !m._optimistic && (
-                        <button
-                          className="msg-action-btn"
-                          onClick={(e) => showMsgMenu(e, m)}
-                          aria-label="Действия"
-                        >
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                            <circle cx="12" cy="6" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="12" cy="18" r="1.5" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <form className="chat-input" onSubmit={sendMessage}>
-              <input
-                type="text"
-                className="message-field"
-                value={message}
-                onChange={e => { setMessage(e.target.value); handleTyping(); }}
-                placeholder="Написать сообщение..."
-                autoComplete="off"
-              />
-              <button type="submit" className="send-btn" aria-label="Отправить">
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                </svg>
-              </button>
-            </form>
-          </>
-        ) : (
-          <div className="chat-placeholder">
-            <span className="chat-placeholder-icon">🍐</span>
-            <h2>Выбери чат</h2>
-            <p>Найди друга через поиск и начни общение</p>
-          </div>
-        )}
-      </main>
-
-      {showMobileSearch && (
-        <div className="mobile-search-overlay" onClick={() => setShowMobileSearch(false)}>
-          <div className="mobile-search-panel" onClick={e => e.stopPropagation()}>
-            <div className="mobile-search-header">
-              <button className="mobile-search-close" onClick={() => setShowMobileSearch(false)}>
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Найти по имени..."
-                value={search}
-                onChange={e => searchUsers(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="search-results">
-              {allUsers.map(u => (
-                <div key={u.id} className="user-item" onClick={() => openChat(u)}>
-                  <div className={`user-avatar ${isOnline(u.id) ? 'online' : ''}`}>
-                    {u.display_name[0].toUpperCase()}
-                  </div>
-                  <div className="user-info">
-                    <span className="user-name">{u.display_name}</span>
-                    <span className="user-username">@{u.username}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <SearchOverlay
+        show={showMobileSearch}
+        onClose={() => setShowMobileSearch(false)}
+        search={search}
+        searchUsers={searchUsers}
+        allUsers={allUsers}
+        isOnline={isOnline}
+        openChat={openChat}
+      />
 
       {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="context-item" onClick={() => copyMessage(contextMenu.message)}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-            </svg>
-            Копировать
-          </button>
-          {contextMenu.isOwn && (
-            <button className="context-item" onClick={() => startEdit(contextMenu.message)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              Редактировать
-            </button>
-          )}
-          <button className="context-item" onClick={() => deleteMessage(contextMenu.message, false)}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            </svg>
-            Удалить у меня
-          </button>
-          {contextMenu.isOwn && (
-            <button className="context-item danger" onClick={() => deleteMessage(contextMenu.message, true)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                <line x1="10" y1="11" x2="10" y2="17" />
-                <line x1="14" y1="11" x2="14" y2="17" />
-              </svg>
-              Удалить у всех
-            </button>
-          )}
-        </div>
+        <ContextMenu
+          contextMenu={contextMenu}
+          onCopy={copyMessage}
+          onEdit={handleEdit}
+          onDeleteForMe={handleDeleteForMe}
+          onDeleteForEveryone={handleDeleteForEveryone}
+        />
       )}
 
       {confirmDialog && (
-        <div className="confirm-overlay" onClick={() => setConfirmDialog(null)}>
-          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <p className="confirm-text">
-              Удалить чат с {confirmDialog.name}? Сообщения будут удалены только у вас.
-            </p>
-            <div className="confirm-actions">
-              <button className="confirm-btn cancel" onClick={() => setConfirmDialog(null)}>Отмена</button>
-              <button className="confirm-btn delete" onClick={deleteConversation}>Удалить</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          confirmDialog={confirmDialog}
+          onConfirm={confirmAction}
+          onCancel={() => setConfirmDialog(null)}
+        />
       )}
+
       {activeCall && (
         <CallModal
           socket={socket}

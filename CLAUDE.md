@@ -7,14 +7,12 @@ GitHub: `fa4891922-boop/mesenger41`, ветка `main`.
 
 ## Предпочтения по стеку
 
-Пользователь предпочитает следующие технологии — используй их по умолчанию:
-
 - **Frontend**: React (последняя версия), Vite, JSX (не TSX)
 - **Backend**: Node.js, Express, Socket.IO для реалтайма
 - **БД**: PostgreSQL через `pg` (параметризованные запросы `$1, $2`)
 - **Кэш**: Redis через `redis`
 - **Реалтайм**: Socket.IO (не голые WebSocket)
-- **CSS**: inline-стили или CSS-переменные, без CSS-фреймворков
+- **CSS**: CSS-классы + CSS-переменные, без CSS-фреймворков
 - **Язык**: JavaScript (без TypeScript)
 - **Деплой**: Render (через MCP-инструменты)
 
@@ -22,53 +20,79 @@ GitHub: `fa4891922-boop/mesenger41`, ветка `main`.
 
 ### Общие правила
 
-- Пиши чистый, читаемый код без лишних абстракций
-- Не добавляй комментарии — код должен говорить сам за себя
-- Не создавай файлы документации, если не просят
-- Имена переменных и функций — camelCase, описательные
-- Строки — одинарные кавычки в JS
-- Точка с запятой — обязательна
+- Чистый, читаемый код без лишних абстракций
+- Без комментариев — код должен говорить сам за себя
+- camelCase для переменных и функций
+- Одинарные кавычки в JS
+- Точка с запятой обязательна
 - Отступы — 2 пробела
 
 ### Backend
 
 - CommonJS: `require` / `module.exports`
 - Async/await вместо колбэков
-- SQL-запросы: всегда параметризованные (`$1, $2`), никогда не конкатенация строк
-- Обработка ошибок: try/catch в async-обработчиках
-- CORS настраивается через переменную `FRONTEND_URL`
+- SQL: всегда параметризованные запросы (`$1, $2`)
+- Обработка ошибок: try/catch, не утекать err.message клиенту
+- CORS через переменную `FRONTEND_URL`
 
 ### Frontend
 
 - ESM: `import` / `export`
-- Функциональные компоненты + хуки (useState, useEffect)
-- Компоненты без классов
-- Socket.IO-клиент инициализируется на уровне модуля (вне компонента)
+- Функциональные компоненты + хуки
 - `import.meta.env.VITE_*` для переменных окружения
-
-### Формат inline-стилей в JSX
-
-```jsx
-<div style={{ padding: '20px', borderRadius: '10px', background: '#fff' }}>
-```
 
 ## Структура проекта
 
 ```
 pearnet/
 ├── CLAUDE.md
+├── README.md
 ├── backend/
-│   ├── index.js          ← точка входа, вся серверная логика
-│   └── package.json
-└── frontend/
-    ├── index.html
-    ├── vite.config.js
-    ├── src/
-    │   ├── main.jsx      ← точка входа React
-    │   ├── App.jsx       ← главный компонент (вся UI-логика)
-    │   ├── App.css
-    │   └── index.css     ← CSS-переменные, глобальные стили
-    └── public/
+│   ├── index.js          ← точка входа
+│   ├── db.js             ← Pool, initDb
+│   ├── package.json
+│   ├── .env.example
+│   ├── middleware/
+│   │   └── auth.js       ← JWT authenticate
+│   ├── routes/
+│   │   ├── auth.js       ← register, login, me
+│   │   ├── users.js      ← поиск пользователей
+│   │   ├── conversations.js ← список диалогов, удаление
+│   │   └── messages.js   ← CRUD сообщений
+│   └── socket/
+│       └── index.js      ← Socket.IO обработчики
+├── frontend/
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── .env.example
+│   ├── src/
+│   │   ├── main.jsx
+│   │   ├── App.jsx
+│   │   ├── App.css
+│   │   ├── index.css
+│   │   ├── AuthPage.jsx
+│   │   ├── Messenger.jsx
+│   │   ├── CallModal.jsx
+│   │   ├── components/
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── ChatArea.jsx
+│   │   │   ├── MessageBubble.jsx
+│   │   │   ├── ChatHeader.jsx
+│   │   │   ├── MessageInput.jsx
+│   │   │   ├── ContextMenu.jsx
+│   │   │   ├── ConfirmDialog.jsx
+│   │   │   └── SearchOverlay.jsx
+│   │   ├── hooks/
+│   │   │   ├── useSocket.js
+│   │   │   ├── useMessages.js
+│   │   │   └── useConversations.js
+│   │   └── utils/
+│   │       ├── api.js
+│   │       └── format.js
+│   └── public/
+└── desktop/
+    ├── main.js
+    └── package.json
 ```
 
 ## Переменные окружения
@@ -78,6 +102,7 @@ pearnet/
 | Переменная     | Обяз. | Описание                        | По умолч. |
 |---------------|-------|---------------------------------|-----------|
 | `DATABASE_URL` | да    | PostgreSQL connection string    | —         |
+| `JWT_SECRET`   | да    | Секрет для подписи JWT          | —         |
 | `REDIS_URL`    | нет   | Redis connection string         | —         |
 | `FRONTEND_URL` | нет   | CORS origin                     | `*`       |
 | `PORT`         | нет   | Порт сервера                    | `3000`    |
@@ -90,28 +115,66 @@ pearnet/
 
 ## API
 
-- `GET /` — healthcheck
-- `GET /api/messages` — последние 100 сообщений
+### REST-эндпоинты
+
+| Метод   | Путь                          | Auth  | Описание                     |
+|---------|-------------------------------|-------|------------------------------|
+| GET     | `/`                           | нет   | Healthcheck                  |
+| POST    | `/api/register`               | нет   | Регистрация                  |
+| POST    | `/api/login`                  | нет   | Авторизация                  |
+| GET     | `/api/me`                     | да    | Текущий пользователь         |
+| GET     | `/api/users?search=`          | да    | Поиск пользователей          |
+| GET     | `/api/conversations`          | да    | Список диалогов              |
+| GET     | `/api/messages/:userId`       | да    | Сообщения с пользователем    |
+| PUT     | `/api/messages/:messageId`    | да    | Редактирование сообщения     |
+| DELETE  | `/api/messages/:messageId`    | да    | Удаление сообщения           |
+| DELETE  | `/api/conversations/:userId`  | да    | Удаление диалога             |
 
 ### WebSocket-события (Socket.IO)
 
-| Направление       | Событие           | Данные                                    |
-|-------------------|-------------------|-------------------------------------------|
-| клиент → сервер   | `send_message`    | `{ username: string, content: string }`   |
-| сервер → клиент   | `receive_message` | объект строки из таблицы `messages`        |
+| Направление       | Событие           | Данные                                      |
+|-------------------|-------------------|---------------------------------------------|
+| клиент → сервер   | `send_message`    | `{ receiverId: number, content: string }`   |
+| клиент → сервер   | `typing`          | `{ receiverId: number }`                    |
+| клиент → сервер   | `call_offer`      | `{ to: number, offer: RTCOffer, callType }` |
+| клиент → сервер   | `call_answer`     | `{ to: number, answer: RTCAnswer }`         |
+| клиент → сервер   | `call_ice`        | `{ to: number, candidate: RTCIceCandidate }`|
+| клиент → сервер   | `call_end`        | `{ to: number }`                            |
+| клиент → сервер   | `call_reject`     | `{ to: number }`                            |
+| сервер → клиент   | `receive_message` | объект строки из `private_messages` + `sender_name` |
+| сервер → клиент   | `online_users`    | `number[]` (массив userId)                  |
+| сервер → клиент   | `user_typing`     | `{ userId: number }`                        |
+| сервер → клиент   | `message_deleted` | `{ messageId: number, forEveryone: bool }`  |
+| сервер → клиент   | `message_edited`  | объект обновлённого сообщения               |
+| сервер → клиент   | `call_incoming`   | `{ from, fromName, offer, callType }`       |
+| сервер → клиент   | `call_answered`   | `{ answer: RTCAnswer }`                     |
+| сервер → клиент   | `call_ice`        | `{ candidate: RTCIceCandidate }`            |
+| сервер → клиент   | `call_ended`      | —                                           |
+| сервер → клиент   | `call_rejected`   | `{ reason: string }`                        |
 
-## БД: таблица messages
+## БД: схема
 
 ```sql
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
-  username TEXT NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS private_messages (
+  id SERIAL PRIMARY KEY,
+  sender_id INTEGER REFERENCES users(id),
+  receiver_id INTEGER REFERENCES users(id),
   content TEXT NOT NULL,
+  edited_at TIMESTAMP,
+  deleted_for_sender BOOLEAN DEFAULT FALSE,
+  deleted_for_receiver BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
-
-Таблица создаётся автоматически при старте backend.
 
 ## Команды
 
@@ -127,47 +190,29 @@ cd frontend && npm run build
 
 # Линтинг
 cd frontend && npm run lint
+
+# Desktop — разработка
+cd desktop && npm run dev
+
+# Desktop — сборка
+cd desktop && npm run build
 ```
 
 ## Деплой на Render (MCP)
-
-Проект деплоится на Render. Инфраструктура:
 
 | Ресурс   | Render ID                        | Имя                  | Регион    |
 |----------|----------------------------------|-----------------------|-----------|
 | Postgres | `dpg-d805956gvqtc73d769j0-a`    | telegram-clone-db     | Frankfurt |
 | Redis    | `red-d80593b7uimc73f7pdg0`      | telegram-clone-redis  | Frankfurt |
 
-### Как деплоить
-
-При деплое используй MCP-инструменты Render:
-
-1. **Backend** — `create_web_service` (runtime: `node`, region: `frankfurt`):
-   - Build: `npm install`
-   - Start: `npm start`
-   - Root dir: `backend`
-   - Env: `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL`
-
-2. **Frontend** — `create_static_site`:
-   - Build: `npm run build`
-   - Publish: `dist`
-   - Root dir: `frontend`
-   - Env: `VITE_BACKEND_URL` = URL бэкенд-сервиса
-
-3. **Env-переменные** — подтягивай connection strings из Postgres и Redis через `get_postgres` / `get_key_value`
-
-### Регион
-
-Все сервисы создавай в **Frankfurt** — там уже живут БД и Redis.
+Все сервисы создавай в **Frankfurt**.
 
 ## Правила работы
 
 - Язык общения: русский
-- Не добавляй TypeScript — проект на чистом JavaScript
-- Не добавляй тестовые фреймворки, если не просят
-- Не предлагай CSS-фреймворки (Tailwind, Bootstrap и т.д.)
-- При добавлении новых страниц/компонентов — создавай отдельные файлы в `src/`
-- При изменении API — обновляй и бэкенд, и фронтенд в одном запросе
+- Не добавляй TypeScript
+- Не добавляй CSS-фреймворки (Tailwind, Bootstrap и т.д.)
 - Всегда используй параметризованные SQL-запросы
 - SSL для PostgreSQL: `{ rejectUnauthorized: false }` (облачная БД)
-- Git: пушь автоматически после коммита, не спрашивай
+- Git: пушь автоматически после коммита
+- При изменении API — обновляй и бэкенд, и фронтенд

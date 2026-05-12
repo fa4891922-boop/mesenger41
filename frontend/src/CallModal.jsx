@@ -7,7 +7,7 @@ const STUN_SERVERS = {
   ],
 };
 
-function CallModal({ socket, user, activeChat, call, onClose }) {
+function CallModal({ socket, activeChat, call, onClose }) {
   const [callState, setCallState] = useState(call.incoming ? 'incoming' : 'calling');
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);

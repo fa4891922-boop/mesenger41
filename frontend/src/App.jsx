@@ -11,20 +11,7 @@ function App() {
     const stored = localStorage.getItem('user');
     return stored ? JSON.parse(stored) : null;
   });
-
-  useEffect(() => {
-    if (token) {
-      fetch(`${BACKEND_URL}/api/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Invalid token');
-          return res.json();
-        })
-        .then(data => setUser(data))
-        .catch(() => handleLogout());
-    }
-  }, []);
+  const [loading, setLoading] = useState(() => !!localStorage.getItem('token'));
 
   const handleAuth = (newToken, newUser) => {
     setToken(newToken);
@@ -37,6 +24,30 @@ function App() {
     setToken(null);
     setUser(null);
   };
+
+  useEffect(() => {
+    if (token) {
+      fetch(`${BACKEND_URL}/api/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Invalid token');
+          return res.json();
+        })
+        .then(data => setUser(data))
+        .catch(() => handleLogout())
+        .finally(() => setLoading(false));
+    }
+  }, [token]);
+
+  if (loading) {
+    return (
+      <div className="app-loading">
+        <div className="app-loading-spinner" />
+        <span className="app-loading-text">PearNet</span>
+      </div>
+    );
+  }
 
   if (!token || !user) {
     return <AuthPage onAuth={handleAuth} />;
