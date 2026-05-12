@@ -206,5 +206,26 @@ ${diagnosticBundle}`;
     }
   });
 
+  router.post('/admin/set-admin', async (req, res) => {
+    const diagToken = req.headers['x-diagnostics-token'];
+    if (!diagToken || !process.env.ADMIN_DIAGNOSTICS_TOKEN || diagToken !== process.env.ADMIN_DIAGNOSTICS_TOKEN) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { username, value } = req.body;
+    if (typeof username !== 'string') return res.status(400).json({ error: 'username required' });
+    try {
+      const { pool } = require('../db');
+      const result = await pool.query(
+        'UPDATE users SET is_admin = $1 WHERE username = $2 RETURNING id, username, is_admin',
+        [value !== false, username.toLowerCase().trim()]
+      );
+      if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+      logger.info('auth', 'admin_rights_updated', { metadata: { username, isAdmin: result.rows[0].is_admin } });
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   return router;
 };
