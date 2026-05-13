@@ -1,12 +1,17 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../db');
 const logger = require('../diagnostics/logger');
+const { isIpBanned, refreshCache } = require('../middleware/banCheck');
 
 const MSG_WINDOW_MS = 10000;
-const MSG_MAX_PER_WINDOW = 20;
-const MSG_AUTOBAN_THRESHOLD = 60;
+const MSG_MAX_PER_WINDOW = 15;
+const MSG_AUTOBAN_THRESHOLD = 40;
 const EVENT_WINDOW_MS = 5000;
-const EVENT_MAX_PER_WINDOW = 50;
+const EVENT_MAX_PER_WINDOW = 30;
+const CONN_PER_IP_WINDOW_MS = 60000;
+const CONN_PER_IP_MAX = 5;
+const DUPLICATE_WINDOW_MS = 3000;
+const MAX_TOTAL_CONNECTIONS = 200;
 
 function setupSocket(io, onlineUsers, redisClient) {
   logger.info('websocket', 'socket_server_initialized');
@@ -14,9 +19,14 @@ function setupSocket(io, onlineUsers, redisClient) {
   const userContacts = new Map();
   const messageRates = new Map();
   const eventRates = new Map();
+  const connRatesPerIp = new Map();
+  const lastMessages = new Map();
+  const userSockets = new Map();
   let broadcastTimer = null;
 
-  function checkRate(map, key, windowMs, max) {
+  io.engine.on('connection_error', () => {});
+
+  function checkRate(map, key, windowMs) {
     const now = Date.now();
     let entry = map.get(key);
     if (!entry || now - entry.start > windowMs) {
@@ -27,7 +37,18 @@ function setupSocket(io, onlineUsers, redisClient) {
     return entry.count;
   }
 
-  async function autoBanUser(userId) {
+  function isDuplicate(userId, content) {
+    const now = Date.now();
+    const key = `${userId}`;
+    const last = lastMessages.get(key);
+    if (last && last.content === content && now - last.time < DUPLICATE_WINDOW_MS) {
+      return true;
+    }
+    lastMessages.set(key, { content, time: now });
+    return false;
+  }
+
+  async function autoBanUser(userId, reason) {
     try {
       await pool.query('UPDATE users SET is_banned = TRUE WHERE id = $1', [userId]);
       const ipResult = await pool.query('SELECT last_ip FROM users WHERE id = $1', [userId]);
@@ -35,10 +56,11 @@ function setupSocket(io, onlineUsers, redisClient) {
       if (ip) {
         await pool.query(
           'INSERT INTO banned_ips (ip_address, user_id, reason) VALUES ($1, $2, $3)',
-          [ip, userId, 'Auto-banned: message spam']
+          [ip, userId, reason]
         );
+        await refreshCache();
       }
-      logger.warn('anti-spam', 'user_auto_banned', { userId });
+      logger.warn('anti-spam', 'user_auto_banned', { userId, metadata: { reason } });
     } catch (err) {
       logger.error('anti-spam', 'auto_ban_failed', { userId, errorMessage: err.message });
     }
@@ -74,9 +96,27 @@ function setupSocket(io, onlineUsers, redisClient) {
   }
 
   io.use(async (socket, next) => {
+    const ip = socket.handshake.address;
+
+    await refreshCache();
+    if (isIpBanned(ip)) {
+      logger.warn('anti-spam', 'banned_ip_socket_rejected', { metadata: { ip } });
+      return next(new Error('Access denied'));
+    }
+
+    if (io.engine.clientsCount >= MAX_TOTAL_CONNECTIONS) {
+      logger.warn('anti-spam', 'max_connections_reached');
+      return next(new Error('Server full'));
+    }
+
+    const connCount = checkRate(connRatesPerIp, ip, CONN_PER_IP_WINDOW_MS);
+    if (connCount > CONN_PER_IP_MAX) {
+      logger.warn('anti-spam', 'connection_rate_exceeded', { metadata: { ip, count: connCount } });
+      return next(new Error('Too many connections'));
+    }
+
     const token = socket.handshake.auth.token;
     if (!token) {
-      logger.warn('websocket', 'auth_no_token');
       return next(new Error('No token'));
     }
     try {
@@ -88,11 +128,9 @@ function setupSocket(io, onlineUsers, redisClient) {
       if (banned.rows[0]?.is_banned) {
         return next(new Error('Banned'));
       }
-      logger.debug('websocket', 'auth_success', { userId: socket.user.id });
       next();
     } catch (err) {
       if (err.message === 'Banned') return next(err);
-      logger.warn('websocket', 'auth_invalid_token');
       next(new Error('Invalid token'));
     }
   });
@@ -100,13 +138,18 @@ function setupSocket(io, onlineUsers, redisClient) {
   io.on('connection', async (socket) => {
     const userId = socket.user.id;
 
-    logger.info('websocket', 'client_connected', {
-      userId,
-      metadata: { onlineCount: onlineUsers.size + 1 },
-    });
+    const existingSocketId = userSockets.get(userId);
+    if (existingSocketId) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket) {
+        existingSocket.disconnect(true);
+      }
+    }
+    userSockets.set(userId, socket.id);
 
     onlineUsers.set(userId, socket.id);
-    pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1', [userId]).catch(() => {});
+    pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP, last_ip = $2 WHERE id = $1',
+      [userId, socket.handshake.address]).catch(() => {});
     if (redisClient) {
       redisClient.set(`online:${userId}`, socket.id, { EX: 3600 }).catch(() => {});
     }
@@ -115,40 +158,53 @@ function setupSocket(io, onlineUsers, redisClient) {
     scheduleBroadcast();
 
     socket.use(([event], next) => {
-      const eventCount = checkRate(eventRates, userId, EVENT_WINDOW_MS, EVENT_MAX_PER_WINDOW);
+      const eventCount = checkRate(eventRates, userId, EVENT_WINDOW_MS);
+      if (eventCount > EVENT_MAX_PER_WINDOW * 3) {
+        autoBanUser(userId, 'Auto-banned: event flood');
+        socket.emit('banned');
+        socket.disconnect(true);
+        return;
+      }
       if (eventCount > EVENT_MAX_PER_WINDOW) {
-        logger.warn('anti-spam', 'event_rate_exceeded', { userId, metadata: { event } });
         return;
       }
       next();
     });
 
     socket.on('send_message', async (data) => {
-      const msgCount = checkRate(messageRates, userId, MSG_WINDOW_MS, MSG_MAX_PER_WINDOW);
+      const msgCount = checkRate(messageRates, userId, MSG_WINDOW_MS);
 
       if (msgCount > MSG_AUTOBAN_THRESHOLD) {
-        logger.warn('anti-spam', 'spam_detected_autoban', { userId, metadata: { count: msgCount } });
-        await autoBanUser(userId);
+        await autoBanUser(userId, 'Auto-banned: message spam');
         socket.emit('banned');
         socket.disconnect(true);
         onlineUsers.delete(userId);
+        userSockets.delete(userId);
         return;
       }
 
       if (msgCount > MSG_MAX_PER_WINDOW) {
-        logger.warn('anti-spam', 'message_rate_exceeded', { userId, metadata: { count: msgCount } });
         socket.emit('rate_limited', { retryAfter: MSG_WINDOW_MS });
         return;
       }
 
-      if (!data.content || typeof data.content !== 'string' || data.content.trim().length === 0) return;
-      if (data.content.length > 10000) return;
-      if (!data.receiverId || !Number.isInteger(data.receiverId)) return;
-      const isEncrypted = data.encrypted === true;
+      if (!data || typeof data !== 'object') return;
+      if (!data.content || typeof data.content !== 'string') return;
+      if (data.content.length === 0 || data.content.length > 5000) return;
+      if (!data.receiverId || typeof data.receiverId !== 'number' || data.receiverId < 1) return;
+      if (data.receiverId === userId) return;
+
+      const contentToStore = data.encrypted === true ? data.content : data.content.trim();
+      if (contentToStore.length === 0) return;
+
+      if (isDuplicate(userId, contentToStore)) {
+        return;
+      }
+
       try {
         const result = await pool.query(
           'INSERT INTO private_messages (sender_id, receiver_id, content, encrypted) VALUES ($1, $2, $3, $4) RETURNING *',
-          [userId, data.receiverId, isEncrypted ? data.content : data.content.trim(), isEncrypted]
+          [userId, data.receiverId, contentToStore, data.encrypted === true]
         );
         const message = { ...result.rows[0], sender_name: socket.user.displayName || socket.user.username };
 
@@ -178,7 +234,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('typing', (data) => {
-      if (!data.receiverId) return;
+      if (!data || !data.receiverId) return;
       const receiverSocketId = onlineUsers.get(data.receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('user_typing', { userId });
@@ -186,6 +242,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('call_offer', (data) => {
+      if (!data || !data.to) return;
       const receiverSocketId = onlineUsers.get(data.to);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('call_incoming', {
@@ -200,6 +257,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('call_answer', (data) => {
+      if (!data || !data.to) return;
       const callerSocketId = onlineUsers.get(data.to);
       if (callerSocketId) {
         io.to(callerSocketId).emit('call_answered', { answer: data.answer });
@@ -207,6 +265,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('call_ice', (data) => {
+      if (!data || !data.to) return;
       const targetSocketId = onlineUsers.get(data.to);
       if (targetSocketId) {
         io.to(targetSocketId).emit('call_ice', { candidate: data.candidate });
@@ -214,6 +273,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('call_end', (data) => {
+      if (!data || !data.to) return;
       const targetSocketId = onlineUsers.get(data.to);
       if (targetSocketId) {
         io.to(targetSocketId).emit('call_ended');
@@ -221,6 +281,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('call_reject', (data) => {
+      if (!data || !data.to) return;
       const callerSocketId = onlineUsers.get(data.to);
       if (callerSocketId) {
         io.to(callerSocketId).emit('call_rejected', { reason: 'declined' });
@@ -228,14 +289,14 @@ function setupSocket(io, onlineUsers, redisClient) {
     });
 
     socket.on('disconnect', () => {
-      logger.info('websocket', 'client_disconnected', {
-        userId,
-        metadata: { onlineCount: onlineUsers.size - 1 },
-      });
-      onlineUsers.delete(userId);
+      if (userSockets.get(userId) === socket.id) {
+        userSockets.delete(userId);
+        onlineUsers.delete(userId);
+      }
       userContacts.delete(userId);
       messageRates.delete(userId);
       eventRates.delete(userId);
+      lastMessages.delete(`${userId}`);
       pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1', [userId]).catch(() => {});
       if (redisClient) {
         redisClient.del(`online:${userId}`).catch(() => {});
@@ -243,6 +304,13 @@ function setupSocket(io, onlineUsers, redisClient) {
       scheduleBroadcast();
     });
   });
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of connRatesPerIp) {
+      if (now - entry.start > CONN_PER_IP_WINDOW_MS * 2) connRatesPerIp.delete(key);
+    }
+  }, 120000);
 }
 
 module.exports = setupSocket;

@@ -18,6 +18,14 @@ module.exports = (redisClient) => {
     message: { error: 'Too many attempts, try again later' },
   });
 
+  const registerLimiter = rateLimit({
+    windowMs: 3600 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many registrations, try again later' },
+  });
+
   function generateAccessToken(user) {
     return jwt.sign(
       { id: user.id, username: user.username, displayName: user.display_name },
@@ -48,7 +56,7 @@ module.exports = (redisClient) => {
     }
   }
 
-  router.post('/register', authLimiter, async (req, res) => {
+  router.post('/register', registerLimiter, async (req, res) => {
     const { username, password, displayName } = req.body;
     logger.info('auth', 'register_attempt', { requestId: req.requestId });
 
@@ -122,12 +130,16 @@ module.exports = (redisClient) => {
       }
 
       const result = await pool.query(
-        'SELECT id, username, display_name FROM users WHERE id = $1',
+        'SELECT id, username, display_name, is_banned FROM users WHERE id = $1',
         [userId]
       );
       if (!result.rows[0]) {
         await revokeRefreshToken(refreshToken);
         return res.status(401).json({ error: 'User not found' });
+      }
+      if (result.rows[0].is_banned) {
+        await revokeRefreshToken(refreshToken);
+        return res.status(403).json({ error: 'Account is banned' });
       }
 
       const user = result.rows[0];

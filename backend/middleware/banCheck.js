@@ -1,19 +1,38 @@
 const { pool } = require('../db');
+const logger = require('../diagnostics/logger');
 
-const banCheck = async (req, res, next) => {
-  const ip = req.ip;
+const ipCache = new Map();
+const CACHE_TTL = 60000;
+let lastCacheRefresh = 0;
+
+async function refreshCache() {
+  const now = Date.now();
+  if (now - lastCacheRefresh < CACHE_TTL) return;
+  lastCacheRefresh = now;
   try {
-    const result = await pool.query(
-      'SELECT 1 FROM banned_ips WHERE ip_address = $1 LIMIT 1',
-      [ip]
-    );
-    if (result.rows.length > 0) {
-      return res.status(403).json({ error: 'Access denied' });
+    const result = await pool.query('SELECT ip_address FROM banned_ips');
+    ipCache.clear();
+    for (const row of result.rows) {
+      ipCache.set(row.ip_address, true);
     }
   } catch {
-    // don't block on DB errors
+    // keep existing cache on error
+  }
+}
+
+function isIpBanned(ip) {
+  return ipCache.has(ip);
+}
+
+const banCheck = async (req, res, next) => {
+  await refreshCache();
+  if (isIpBanned(req.ip)) {
+    return res.status(403).json({ error: 'Access denied' });
   }
   next();
 };
+
+banCheck.isIpBanned = isIpBanned;
+banCheck.refreshCache = refreshCache;
 
 module.exports = banCheck;

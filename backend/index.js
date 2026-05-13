@@ -47,7 +47,7 @@ app.use(banCheck);
 
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests' },
@@ -59,6 +59,11 @@ const io = new Server(server, {
     origin: corsOrigin,
     methods: ['GET', 'POST'],
   },
+  maxHttpBufferSize: 64 * 1024,
+  pingTimeout: 20000,
+  pingInterval: 25000,
+  connectTimeout: 10000,
+  perMessageDeflate: false,
 });
 
 const onlineUsers = new Map();
