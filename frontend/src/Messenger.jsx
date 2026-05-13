@@ -39,7 +39,6 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
   const [contextMenu, setContextMenu] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
-  const [sharedKey, setSharedKey] = useState(null);
   const [e2eeReady, setE2eeReady] = useState(false);
   const isMobile = useIsMobile();
   const privateKeyRef = useRef(null);
@@ -93,7 +92,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
       const existing = prev.find(c => c.id === otherUserId);
       if (existing) {
         return [
-          { ...existing, last_message: msg.encrypted ? '...' : msg.content, last_message_at: msg.created_at },
+          { ...existing, last_message: msg._decryptFailed ? '...' : msg.content, last_message_at: msg.created_at },
           ...prev.filter(c => c.id !== otherUserId),
         ];
       }
@@ -108,7 +107,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
     typing, rateLimited, loadingMessages, hasMore, loadingOlder,
     loadMessages, loadOlderMessages, sendMessage, retryMessage, deleteMessage,
     startEdit, saveEdit, cancelEdit, handleTyping,
-  } = useMessages(token, socket, user, activeChat, handleNewMessage, sharedKey);
+  } = useMessages(token, socket, user, activeChat, handleNewMessage, getSharedKey);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
@@ -153,9 +152,8 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
     if (isMobile) setShowSidebar(false);
 
     const key = await getSharedKey(chatUser.id);
-    setSharedKey(key);
 
-    await loadMessages(chatUser);
+    await loadMessages(chatUser, key);
   };
 
   const showContextMenu = (e, msg) => {

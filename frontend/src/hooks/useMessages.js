@@ -3,7 +3,7 @@ import { apiFetch, readJsonResponse } from '../utils/api';
 import { diagLog } from '../utils/diagnostics';
 import { decryptMessage, encryptMessage } from '../utils/crypto';
 
-export default function useMessages(token, socket, user, activeChat, onConversationUpdate, sharedKey) {
+export default function useMessages(token, socket, user, activeChat, onConversationUpdate, getSharedKey) {
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [editingMessage, setEditingMessage] = useState(null);
@@ -18,11 +18,12 @@ export default function useMessages(token, socket, user, activeChat, onConversat
   const chatRef = useRef(null);
   const typingTimeout = useRef(null);
   const shouldScrollBottom = useRef(true);
-  const sharedKeyRef = useRef(sharedKey);
+  const sharedKeyRef = useRef(null);
+  const getSharedKeyRef = useRef(getSharedKey);
 
   useEffect(() => {
-    sharedKeyRef.current = sharedKey;
-  }, [sharedKey]);
+    getSharedKeyRef.current = getSharedKey;
+  }, [getSharedKey]);
 
   useEffect(() => {
     activeChatRef.current = activeChat;
@@ -42,15 +43,34 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     }
   }, [editingMessage, editText.length]);
 
-  async function decryptIfNeeded(msg) {
-    if (!msg.encrypted || !sharedKeyRef.current) return msg;
-    const plaintext = await decryptMessage(sharedKeyRef.current, msg.content);
+  async function resolveKey(peerId) {
+    if (sharedKeyRef.current) return sharedKeyRef.current;
+    if (!getSharedKeyRef.current) return null;
+    try {
+      return await getSharedKeyRef.current(peerId);
+    } catch {
+      return null;
+    }
+  }
+
+  async function decryptIfNeeded(msg, keyOverride) {
+    if (!msg.encrypted) return msg;
+    const key = keyOverride || sharedKeyRef.current;
+    if (!key) {
+      const peerId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+      const derived = await resolveKey(peerId);
+      if (!derived) return { ...msg, content: '[Не удалось расшифровать]', _decryptFailed: true };
+      const plaintext = await decryptMessage(derived, msg.content);
+      if (plaintext === null) return { ...msg, content: '[Не удалось расшифровать]', _decryptFailed: true };
+      return { ...msg, content: plaintext };
+    }
+    const plaintext = await decryptMessage(key, msg.content);
     if (plaintext === null) return { ...msg, content: '[Не удалось расшифровать]', _decryptFailed: true };
     return { ...msg, content: plaintext };
   }
 
-  async function decryptMessages(msgs) {
-    return Promise.all(msgs.map(decryptIfNeeded));
+  async function decryptMessages(msgs, keyOverride) {
+    return Promise.all(msgs.map(m => decryptIfNeeded(m, keyOverride)));
   }
 
   useEffect(() => {
@@ -58,8 +78,8 @@ export default function useMessages(token, socket, user, activeChat, onConversat
 
     const handleReceiveMessage = async (msg) => {
       const current = activeChatRef.current;
+      const decrypted = await decryptIfNeeded(msg);
       if (current && (msg.sender_id === current.id || msg.receiver_id === current.id)) {
-        const decrypted = await decryptIfNeeded(msg);
         setMessages(prev => {
           const idx = prev.findIndex(m => m._optimistic &&
             m.sender_id === msg.sender_id && m._plainContent === decrypted.content);
@@ -71,7 +91,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
           return [...prev, decrypted];
         });
       }
-      onConversationUpdate(msg);
+      onConversationUpdate(decrypted);
     };
 
     const handleMessageDeleted = (data) => {
@@ -116,13 +136,14 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     };
   }, [socket, onConversationUpdate]);
 
-  const loadMessages = async (chatUser) => {
+  const loadMessages = async (chatUser, keyOverride) => {
+    if (keyOverride) sharedKeyRef.current = keyOverride;
     setLoadingMessages(true);
     try {
       const res = await apiFetch(`/api/messages/${chatUser.id}?limit=50`, token);
       const data = await readJsonResponse(res);
       const raw = data.messages || [];
-      const decrypted = await decryptMessages(raw);
+      const decrypted = await decryptMessages(raw, sharedKeyRef.current);
       setMessages(decrypted);
       setHasMore(data.hasMore || false);
     } catch (err) {
@@ -166,7 +187,11 @@ export default function useMessages(token, socket, user, activeChat, onConversat
     if (!message.trim() || !activeChatRef.current || !socket) return;
 
     const plainContent = message.trim();
-    const key = sharedKeyRef.current;
+    let key = sharedKeyRef.current;
+    if (!key && getSharedKeyRef.current) {
+      key = await getSharedKeyRef.current(activeChatRef.current.id);
+      if (key) sharedKeyRef.current = key;
+    }
     let contentToSend = plainContent;
     let encrypted = false;
 
