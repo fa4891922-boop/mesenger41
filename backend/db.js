@@ -2,7 +2,11 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 10000,
 });
 
 async function initDb() {
@@ -65,6 +69,17 @@ async function initDb() {
 
   await pool.query(`UPDATE users SET is_admin = FALSE WHERE username != 'admin'`).catch(() => {});
   await pool.query(`UPDATE users SET is_banned = TRUE WHERE display_name = 'Педик' OR username = 'педик'`).catch(() => {});
+
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_pm_sender_receiver ON private_messages(sender_id, receiver_id, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_pm_receiver_sender ON private_messages(receiver_id, sender_id, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_pm_created ON private_messages(created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+    'CREATE INDEX IF NOT EXISTS idx_banned_ips_ip ON banned_ips(ip_address)',
+  ];
+  for (const idx of indexes) {
+    await pool.query(idx).catch(() => {});
+  }
 }
 
 module.exports = { pool, initDb };

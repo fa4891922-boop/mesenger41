@@ -105,7 +105,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
   const {
     messages, message, setMessage,
     editingMessage, editText, setEditText, editInputRef, chatRef,
-    typing, loadingMessages, hasMore, loadingOlder,
+    typing, rateLimited, loadingMessages, hasMore, loadingOlder,
     loadMessages, loadOlderMessages, sendMessage, retryMessage, deleteMessage,
     startEdit, saveEdit, cancelEdit, handleTyping,
   } = useMessages(token, socket, user, activeChat, handleNewMessage, sharedKey);
@@ -258,6 +258,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
         loadOlderMessages={loadOlderMessages}
         user={user}
         typing={typing}
+        rateLimited={rateLimited}
         connectionStatus={connectionStatus}
         isOnline={isOnline}
         isMobile={isMobile}

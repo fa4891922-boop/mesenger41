@@ -11,6 +11,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
   const [typing, setTyping] = useState(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [rateLimited, setRateLimited] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const activeChatRef = useRef(null);
   const editInputRef = useRef(null);
@@ -95,16 +96,23 @@ export default function useMessages(token, socket, user, activeChat, onConversat
       }
     };
 
+    const handleRateLimited = () => {
+      setRateLimited(true);
+      setTimeout(() => setRateLimited(false), 3000);
+    };
+
     socket.on('receive_message', handleReceiveMessage);
     socket.on('message_deleted', handleMessageDeleted);
     socket.on('message_edited', handleMessageEdited);
     socket.on('user_typing', handleUserTyping);
+    socket.on('rate_limited', handleRateLimited);
 
     return () => {
       socket.off('receive_message', handleReceiveMessage);
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('message_edited', handleMessageEdited);
       socket.off('user_typing', handleUserTyping);
+      socket.off('rate_limited', handleRateLimited);
     };
   }, [socket, onConversationUpdate]);
 
@@ -294,7 +302,7 @@ export default function useMessages(token, socket, user, activeChat, onConversat
   return {
     messages, setMessages, message, setMessage,
     editingMessage, editText, setEditText, editInputRef, chatRef,
-    typing, loadingMessages, hasMore, loadingOlder,
+    typing, rateLimited, loadingMessages, hasMore, loadingOlder,
     loadMessages, loadOlderMessages, sendMessage, retryMessage, deleteMessage,
     startEdit, saveEdit, cancelEdit, handleTyping,
   };

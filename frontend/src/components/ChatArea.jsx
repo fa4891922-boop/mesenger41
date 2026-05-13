@@ -6,7 +6,7 @@ import MessageInput from './MessageInput';
 
 function ChatArea({
   activeChat, messages, loadingMessages, hasMore, loadingOlder, loadOlderMessages,
-  user, typing, connectionStatus,
+  user, typing, rateLimited, connectionStatus,
   isOnline, isMobile, showSidebar, setShowSidebar,
   message, setMessage, sendMessage, handleTyping,
   editingMessage, editText, setEditText, saveEdit, cancelEdit, editInputRef,
@@ -48,6 +48,12 @@ function ChatArea({
           {connectionStatus !== 'connected' && (
             <div className="connection-banner">
               {connectionStatus === 'reconnecting' ? 'Переподключение...' : 'Нет соединения с сервером'}
+            </div>
+          )}
+
+          {rateLimited && (
+            <div className="connection-banner" style={{ background: '#d4a017' }}>
+              Слишком много сообщений — подождите несколько секунд
             </div>
           )}
 
