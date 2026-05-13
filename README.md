@@ -73,6 +73,7 @@ Then build the APK/AAB from Android Studio. Do not use `localhost`, `127.0.0.1`,
 | `JWT_SECRET`   | yes      | JWT signing secret       | -       |
 | `REDIS_URL`    | no       | Redis connection         | -       |
 | `FRONTEND_URL` | no       | CORS origin              | `*`     |
+| `SOCKET_CONN_PER_IP_MAX` | no | Socket connection attempts per IP per minute | `30` |
 | `PORT`         | no       | Server port              | `3000`  |
 
 ### Frontend (`frontend/.env`)

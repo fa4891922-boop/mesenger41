@@ -9,9 +9,23 @@ const MSG_AUTOBAN_THRESHOLD = 40;
 const EVENT_WINDOW_MS = 5000;
 const EVENT_MAX_PER_WINDOW = 30;
 const CONN_PER_IP_WINDOW_MS = 60000;
-const CONN_PER_IP_MAX = 5;
+const CONN_PER_IP_MAX = Number(process.env.SOCKET_CONN_PER_IP_MAX || 30);
 const DUPLICATE_WINDOW_MS = 3000;
 const MAX_TOTAL_CONNECTIONS = 200;
+
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function getClientIp(socket) {
+  const headers = socket.handshake.headers || {};
+  const forwardedFor = firstHeaderValue(headers['x-forwarded-for']);
+  const realIp = firstHeaderValue(headers['x-real-ip']);
+  const cfIp = firstHeaderValue(headers['cf-connecting-ip']);
+  const candidate = cfIp || realIp || forwardedFor?.split(',')[0] || socket.handshake.address;
+  return candidate?.trim() || socket.handshake.address;
+}
 
 function setupSocket(io, onlineUsers, redisClient) {
   logger.info('websocket', 'socket_server_initialized');
@@ -24,7 +38,15 @@ function setupSocket(io, onlineUsers, redisClient) {
   const userSockets = new Map();
   let broadcastTimer = null;
 
-  io.engine.on('connection_error', () => {});
+  io.engine.on('connection_error', (err) => {
+    logger.warn('websocket', 'engine_connection_error', {
+      errorMessage: err.message,
+      metadata: {
+        code: err.code,
+        context: err.context?.name,
+      },
+    });
+  });
 
   function checkRate(map, key, windowMs) {
     const now = Date.now();
@@ -96,7 +118,8 @@ function setupSocket(io, onlineUsers, redisClient) {
   }
 
   io.use(async (socket, next) => {
-    const ip = socket.handshake.address;
+    const ip = getClientIp(socket);
+    socket.clientIp = ip;
 
     await refreshCache();
     if (isIpBanned(ip)) {
@@ -149,7 +172,7 @@ function setupSocket(io, onlineUsers, redisClient) {
 
     onlineUsers.set(userId, socket.id);
     pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP, last_ip = $2 WHERE id = $1',
-      [userId, socket.handshake.address]).catch(() => {});
+      [userId, socket.clientIp]).catch(() => {});
     if (redisClient) {
       redisClient.set(`online:${userId}`, socket.id, { EX: 3600 }).catch(() => {});
     }

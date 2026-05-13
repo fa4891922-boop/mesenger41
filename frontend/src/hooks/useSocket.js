@@ -21,6 +21,8 @@ export default function useSocket(token, onBanned) {
   useEffect(() => {
     const s = io(BACKEND_URL, {
       auth: { token: tokenRef.current || getAccessToken() },
+      transports: ['websocket', 'polling'],
+      tryAllTransports: true,
     });
     socketRef.current = s;
 
@@ -28,7 +30,16 @@ export default function useSocket(token, onBanned) {
       setSocket(s);
       setConnectionStatus('connected');
     });
-    s.on('disconnect', () => setConnectionStatus('disconnected'));
+    s.on('disconnect', () => {
+      setSocket(null);
+      setConnectionStatus('disconnected');
+    });
+    s.on('connect_error', (err) => {
+      setConnectionStatus('disconnected');
+      if (err.message === 'Banned' && onBannedRef.current) {
+        onBannedRef.current();
+      }
+    });
     s.io.on('reconnect_attempt', () => {
       setConnectionStatus('reconnecting');
       s.auth = { token: getAccessToken() || tokenRef.current };
