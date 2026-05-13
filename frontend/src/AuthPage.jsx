@@ -27,9 +27,7 @@ function AuthPage({ onAuth }) {
       });
       const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      onAuth(data.token, data.user);
+      onAuth(data.accessToken, data.refreshToken, data.user);
     } catch (err) {
       setError(err.message);
     } finally {

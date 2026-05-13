@@ -32,9 +32,13 @@ export default function useConversations(token) {
     }, 300);
   };
 
-  const deleteChat = async (userId) => {
+  const deleteChat = async (userId, forBoth = false) => {
     try {
-      const res = await apiFetch(`/api/conversations/${userId}`, token, { method: 'DELETE' });
+      const res = await apiFetch(`/api/conversations/${userId}`, token, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forBoth }),
+      });
       return res.ok;
     } catch (err) {
       console.error(err);

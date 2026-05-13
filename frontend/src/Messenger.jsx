@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import useSocket from './hooks/useSocket';
 import useConversations from './hooks/useConversations';
 import useMessages from './hooks/useMessages';
@@ -8,6 +8,11 @@ import ContextMenu from './components/ContextMenu';
 import ConfirmDialog from './components/ConfirmDialog';
 import SearchOverlay from './components/SearchOverlay';
 import CallModal from './CallModal.jsx';
+import { apiFetch, readJsonResponse } from './utils/api.js';
+import {
+  loadPrivateKey, generateKeyPair, savePrivateKey,
+  exportPublicKey, importPublicKey, deriveSharedKey,
+} from './utils/crypto.js';
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
@@ -34,7 +39,53 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
   const [contextMenu, setContextMenu] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
+  const [sharedKey, setSharedKey] = useState(null);
+  const [e2eeReady, setE2eeReady] = useState(false);
   const isMobile = useIsMobile();
+  const privateKeyRef = useRef(null);
+  const sharedKeyCache = useRef(new Map());
+
+  useEffect(() => {
+    (async () => {
+      try {
+        let privKey = await loadPrivateKey();
+        if (!privKey) {
+          const keyPair = await generateKeyPair();
+          privKey = keyPair.privateKey;
+          await savePrivateKey(privKey);
+          const pubJwk = await exportPublicKey(keyPair.publicKey);
+          await apiFetch('/api/keys', token, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ publicKey: JSON.stringify(pubJwk) }),
+          });
+        }
+        privateKeyRef.current = privKey;
+        setE2eeReady(true);
+      } catch (err) {
+        console.error('E2EE init failed:', err);
+        setE2eeReady(true);
+      }
+    })();
+  }, [token]);
+
+  const getSharedKey = useCallback(async (peerId) => {
+    if (!privateKeyRef.current) return null;
+    if (sharedKeyCache.current.has(peerId)) {
+      return sharedKeyCache.current.get(peerId);
+    }
+    try {
+      const res = await apiFetch(`/api/keys/${peerId}`, token);
+      const data = await readJsonResponse(res);
+      if (!data.publicKey) return null;
+      const peerPubKey = await importPublicKey(JSON.parse(data.publicKey));
+      const derived = await deriveSharedKey(privateKeyRef.current, peerPubKey);
+      sharedKeyCache.current.set(peerId, derived);
+      return derived;
+    } catch {
+      return null;
+    }
+  }, [token]);
 
   const handleNewMessage = useCallback((msg) => {
     const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
@@ -42,7 +93,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
       const existing = prev.find(c => c.id === otherUserId);
       if (existing) {
         return [
-          { ...existing, last_message: msg.content, last_message_at: msg.created_at },
+          { ...existing, last_message: msg.encrypted ? '...' : msg.content, last_message_at: msg.created_at },
           ...prev.filter(c => c.id !== otherUserId),
         ];
       }
@@ -57,16 +108,24 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
     typing, loadingMessages, hasMore, loadingOlder,
     loadMessages, loadOlderMessages, sendMessage, retryMessage, deleteMessage,
     startEdit, saveEdit, cancelEdit, handleTyping,
-  } = useMessages(token, socket, user, activeChat, handleNewMessage);
+  } = useMessages(token, socket, user, activeChat, handleNewMessage, sharedKey);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
   useEffect(() => {
     if (!socket) return;
     const handleCallIncoming = (data) => setActiveCall({ incoming: true, ...data });
+    const handleConversationDeleted = (data) => {
+      setConversations(prev => prev.filter(c => c.id !== data.userId));
+      if (activeChat?.id === data.userId) setActiveChat(null);
+    };
     socket.on('call_incoming', handleCallIncoming);
-    return () => socket.off('call_incoming', handleCallIncoming);
-  }, [socket]);
+    socket.on('conversation_deleted', handleConversationDeleted);
+    return () => {
+      socket.off('call_incoming', handleCallIncoming);
+      socket.off('conversation_deleted', handleConversationDeleted);
+    };
+  }, [socket, activeChat, setConversations]);
 
   useEffect(() => {
     if (connectionStatus === 'connected') loadConversations();
@@ -92,6 +151,10 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
     setAllUsers([]);
     closeAllMenus();
     if (isMobile) setShowSidebar(false);
+
+    const key = await getSharedKey(chatUser.id);
+    setSharedKey(key);
+
     await loadMessages(chatUser);
   };
 
@@ -124,10 +187,10 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
     setConfirmDialog({ type: 'deleteChat', userId, name });
   };
 
-  const confirmAction = async () => {
+  const confirmAction = async (forBoth) => {
     if (!confirmDialog) return;
     if (confirmDialog.type === 'deleteChat') {
-      const ok = await deleteChat(confirmDialog.userId);
+      const ok = await deleteChat(confirmDialog.userId, forBoth);
       if (ok) {
         if (activeChat?.id === confirmDialog.userId) {
           setActiveChat(null);
@@ -249,6 +312,7 @@ function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
       {activeCall && (
         <CallModal
           socket={socket}
+          token={token}
           user={user}
           activeChat={activeChat}
           call={activeCall}

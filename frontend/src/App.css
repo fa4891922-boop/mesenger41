@@ -951,6 +951,12 @@
 
 .confirm-btn.delete:hover { background: #e84050; transform: translateY(-1px); }
 
+.confirm-btn.danger-full {
+  background: #c0392b;
+}
+
+.confirm-btn.danger-full:hover { background: #a93226; transform: translateY(-1px); }
+
 /* ═══════════════════════════════
    RESPONSIVE
    ═══════════════════════════════ */

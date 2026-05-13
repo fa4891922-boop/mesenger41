@@ -32,7 +32,7 @@ module.exports = (io, onlineUsers) => {
       logger.info('message-flow', 'messages_loaded', {
         requestId: req.requestId,
         userId: req.user.id,
-        metadata: { peerIdHash: logger.hashId(userId), count: messages.length, hasMore },
+        metadata: { count: messages.length, hasMore },
       });
       res.json({ messages, hasMore });
     } catch (err) {

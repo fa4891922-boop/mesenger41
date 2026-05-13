@@ -5,6 +5,33 @@ const logger = require('../diagnostics/logger');
 function setupSocket(io, onlineUsers, redisClient) {
   logger.info('websocket', 'socket_server_initialized');
 
+  const userContacts = new Map();
+
+  async function loadUserContacts(userId) {
+    try {
+      const result = await pool.query(
+        `SELECT DISTINCT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS contact_id
+         FROM private_messages
+         WHERE (sender_id = $1 OR receiver_id = $1)
+           AND deleted_for_sender = FALSE AND deleted_for_receiver = FALSE`,
+        [userId]
+      );
+      const contacts = result.rows.map(r => r.contact_id);
+      userContacts.set(userId, contacts);
+      return contacts;
+    } catch {
+      return [];
+    }
+  }
+
+  function broadcastOnlineStatus() {
+    for (const [userId, socketId] of onlineUsers) {
+      const contacts = userContacts.get(userId) || [];
+      const visibleOnline = contacts.filter(cId => onlineUsers.has(cId));
+      io.to(socketId).emit('online_users', visibleOnline);
+    }
+  }
+
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
@@ -32,45 +59,46 @@ function setupSocket(io, onlineUsers, redisClient) {
     if (redisClient) {
       redisClient.set(`online:${socket.user.id}`, socket.id, { EX: 3600 }).catch(() => {});
     }
-    io.emit('online_users', Array.from(onlineUsers.keys()));
+
+    await loadUserContacts(socket.user.id);
+    broadcastOnlineStatus();
 
     socket.on('send_message', async (data) => {
       logger.info('message-flow', 'ws_send_message_received', {
         userId: socket.user.id,
-        metadata: {
-          receiverIdHash: logger.hashId(data.receiverId),
-          contentLength: data.content?.length,
-          receiverOnline: onlineUsers.has(data.receiverId),
-        },
       });
 
       if (!data.content || typeof data.content !== 'string' || data.content.trim().length === 0) return;
-      if (data.content.length > 5000) return;
+      if (data.content.length > 10000) return;
       if (!data.receiverId || !Number.isInteger(data.receiverId)) return;
+      const isEncrypted = data.encrypted === true;
       try {
         const result = await pool.query(
-          'INSERT INTO private_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
-          [socket.user.id, data.receiverId, data.content.trim()]
+          'INSERT INTO private_messages (sender_id, receiver_id, content, encrypted) VALUES ($1, $2, $3, $4) RETURNING *',
+          [socket.user.id, data.receiverId, isEncrypted ? data.content : data.content.trim(), isEncrypted]
         );
         const message = { ...result.rows[0], sender_name: socket.user.displayName || socket.user.username };
 
         logger.info('message-flow', 'ws_message_db_insert_success', {
           userId: socket.user.id,
-          metadata: { messageId: message.id, contentLength: data.content.trim().length },
+          metadata: { messageId: message.id },
         });
+
+        const senderContacts = userContacts.get(socket.user.id) || [];
+        if (!senderContacts.includes(data.receiverId)) {
+          senderContacts.push(data.receiverId);
+          userContacts.set(socket.user.id, senderContacts);
+        }
+        const receiverContacts = userContacts.get(data.receiverId) || [];
+        if (!receiverContacts.includes(socket.user.id)) {
+          receiverContacts.push(socket.user.id);
+          userContacts.set(data.receiverId, receiverContacts);
+        }
 
         const receiverSocketId = onlineUsers.get(data.receiverId);
         if (receiverSocketId) {
           io.to(receiverSocketId).emit('receive_message', message);
-          logger.info('message-flow', 'ws_message_emit_to_receiver', {
-            userId: socket.user.id,
-            metadata: { messageId: message.id, receiverOnline: true },
-          });
-        } else {
-          logger.info('message-flow', 'ws_receiver_offline', {
-            userId: socket.user.id,
-            metadata: { messageId: message.id, receiverOnline: false },
-          });
+          broadcastOnlineStatus();
         }
         socket.emit('receive_message', message);
       } catch (err) {
@@ -137,11 +165,12 @@ function setupSocket(io, onlineUsers, redisClient) {
         metadata: { onlineCount: onlineUsers.size - 1 },
       });
       onlineUsers.delete(socket.user.id);
+      userContacts.delete(socket.user.id);
       pool.query('UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1', [socket.user.id]).catch(() => {});
       if (redisClient) {
         redisClient.del(`online:${socket.user.id}`).catch(() => {});
       }
-      io.emit('online_users', Array.from(onlineUsers.keys()));
+      broadcastOnlineStatus();
     });
   });
 }

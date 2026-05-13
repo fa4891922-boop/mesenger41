@@ -30,16 +30,27 @@ async function initDb() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_keys (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id),
+      public_key TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   const cols = [
     { table: 'private_messages', col: 'edited_at', type: 'TIMESTAMP' },
     { table: 'private_messages', col: 'deleted_for_sender', type: 'BOOLEAN DEFAULT FALSE' },
     { table: 'private_messages', col: 'deleted_for_receiver', type: 'BOOLEAN DEFAULT FALSE' },
+    { table: 'private_messages', col: 'encrypted', type: 'BOOLEAN DEFAULT FALSE' },
     { table: 'users', col: 'last_seen', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
     { table: 'users', col: 'is_admin', type: 'BOOLEAN DEFAULT FALSE' },
   ];
   for (const { table, col, type } of cols) {
     await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${type}`).catch(() => {});
   }
+
+  await pool.query(`UPDATE users SET is_admin = FALSE WHERE username != 'admin'`).catch(() => {});
 }
 
 module.exports = { pool, initDb };

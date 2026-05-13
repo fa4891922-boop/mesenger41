@@ -1,13 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { apiFetch, readJsonResponse } from './utils/api.js';
 
-const STUN_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
-
-function CallModal({ socket, activeChat, call, onClose }) {
+function CallModal({ socket, token, activeChat, call, onClose }) {
   const [callState, setCallState] = useState(call.incoming ? 'incoming' : 'calling');
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
@@ -19,6 +13,7 @@ function CallModal({ socket, activeChat, call, onClose }) {
   const localStreamRef = useRef(null);
   const timerRef = useRef(null);
   const iceCandidatesQueue = useRef([]);
+  const iceConfigRef = useRef(null);
 
   const isVideo = call.callType === 'video';
 
@@ -34,8 +29,29 @@ function CallModal({ socket, activeChat, call, onClose }) {
     }
   };
 
-  const createPeerConnection = () => {
-    const pc = new RTCPeerConnection(STUN_SERVERS);
+  const fetchIceConfig = async () => {
+    if (iceConfigRef.current) return iceConfigRef.current;
+    try {
+      const res = await apiFetch('/api/turn-credentials', token);
+      const data = await readJsonResponse(res);
+      const config = {
+        iceServers: data.iceServers,
+        iceTransportPolicy: data.iceServers.some(s => s.credential) ? 'relay' : 'all',
+      };
+      iceConfigRef.current = config;
+      return config;
+    } catch {
+      return {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      };
+    }
+  };
+
+  const createPeerConnection = (iceConfig) => {
+    const pc = new RTCPeerConnection(iceConfig);
 
     pc.onicecandidate = (e) => {
       if (e.candidate && socket) {
@@ -75,8 +91,9 @@ function CallModal({ socket, activeChat, call, onClose }) {
 
   const startCall = async () => {
     try {
+      const iceConfig = await fetchIceConfig();
       const stream = await getMedia();
-      const pc = createPeerConnection();
+      const pc = createPeerConnection(iceConfig);
       pcRef.current = pc;
 
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
@@ -100,8 +117,9 @@ function CallModal({ socket, activeChat, call, onClose }) {
     timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
 
     try {
+      const iceConfig = await fetchIceConfig();
       const stream = await getMedia();
-      const pc = createPeerConnection();
+      const pc = createPeerConnection(iceConfig);
       pcRef.current = pc;
 
       stream.getTracks().forEach(t => pc.addTrack(t, stream));

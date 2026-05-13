@@ -3,43 +3,65 @@ import AuthPage from './AuthPage.jsx';
 import Messenger from './Messenger.jsx';
 import AdminDiagnostics from './AdminDiagnostics.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { apiFetch, readJsonResponse } from './utils/api.js';
+import { apiFetch, readJsonResponse, setTokens, getAccessToken, getRefreshToken, clearTokens, setOnTokenRefreshed } from './utils/api.js';
 import './App.css';
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem('user');
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [loading, setLoading] = useState(() => !!localStorage.getItem('token'));
+  const [token, setToken] = useState(null);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(() => !!getRefreshToken());
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
-  const handleAuth = (newToken, newUser) => {
-    setToken(newToken);
+  const handleAuth = (accessToken, refreshTokenVal, newUser) => {
+    setTokens(accessToken, refreshTokenVal);
+    setToken(accessToken);
     setUser(newUser);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const handleLogout = async () => {
+    const rt = getRefreshToken();
+    if (rt && token) {
+      apiFetch('/api/logout', token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt }),
+      }).catch(() => {});
+    }
+    clearTokens();
     setToken(null);
     setUser(null);
     setShowDiagnostics(false);
   };
 
   useEffect(() => {
-    if (token) {
-      apiFetch('/api/me', token)
-        .then(res => {
-          if (!res.ok) throw new Error('Invalid token');
-          return readJsonResponse(res);
-        })
-        .then(data => setUser(data))
-        .catch(() => handleLogout())
-        .finally(() => setLoading(false));
+    setOnTokenRefreshed((newToken) => {
+      setToken(newToken);
+    });
+  }, []);
+
+  useEffect(() => {
+    const rt = getRefreshToken();
+    if (!rt) {
+      setLoading(false);
+      return;
     }
-  }, [token]);
+
+    apiFetch('/api/me', null)
+      .then(res => {
+        if (!res.ok) throw new Error('Invalid token');
+        return readJsonResponse(res);
+      })
+      .then(data => {
+        setToken(getAccessToken());
+        setUser(data);
+      })
+      .catch(() => {
+        clearTokens();
+        setToken(null);
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   if (loading) {
     return (

@@ -1,4 +1,4 @@
-import { BACKEND_URL } from './api';
+import { BACKEND_URL, getAccessToken } from './api';
 const MAX_BUFFER = 200;
 
 const buffer = [];
@@ -22,7 +22,7 @@ export function getBuffer() {
 
 export function reportError(error, context = {}) {
   try {
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     if (!token) return;
 
     const payload = {

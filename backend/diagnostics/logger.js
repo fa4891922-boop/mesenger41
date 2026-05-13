@@ -12,7 +12,15 @@ class RingBuffer {
       if (this.buffer.length > this.maxSize) {
         this.buffer.shift();
       }
+      this._pruneOld();
     } catch { /* never crash */ }
+  }
+
+  _pruneOld() {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    while (this.buffer.length > 0 && new Date(this.buffer[0].timestamp).getTime() < cutoff) {
+      this.buffer.shift();
+    }
   }
 
   query(filters = {}, limit = 200) {

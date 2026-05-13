@@ -74,10 +74,12 @@ if (process.env.REDIS_URL) {
 }
 
 app.get('/', (req, res) => res.send('PearNet API is running!'));
-app.use('/api', require('./routes/auth'));
+app.use('/api', require('./routes/auth')(redisClient));
 app.use('/api', require('./routes/users'));
-app.use('/api', require('./routes/conversations'));
+app.use('/api', require('./routes/conversations')(io, onlineUsers));
 app.use('/api', require('./routes/messages')(io, onlineUsers));
+app.use('/api', require('./routes/turn'));
+app.use('/api', require('./routes/keys'));
 app.use('/api', require('./routes/diagnostics')(io, onlineUsers, redisClient));
 
 setupSocket(io, onlineUsers, redisClient);
