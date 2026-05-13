@@ -25,7 +25,7 @@ function useIsMobile() {
 }
 
 function Messenger({ token, user, onLogout, onOpenDiagnostics }) {
-  const { socket, connectionStatus, onlineUsers } = useSocket(token);
+  const { socket, connectionStatus, onlineUsers } = useSocket(token, onLogout);
   const {
     conversations, setConversations, loadConversations,
     search, setSearch, allUsers, setAllUsers, searchUsers,

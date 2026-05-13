@@ -68,6 +68,7 @@ module.exports = (redisClient) => {
       const accessToken = generateAccessToken(user);
       const refreshToken = generateRefreshToken();
       await storeRefreshToken(refreshToken, user.id);
+      pool.query('UPDATE users SET last_ip = $1 WHERE id = $2', [req.ip, user.id]).catch(() => {});
       logger.info('auth', 'register_success', { requestId: req.requestId, userId: user.id });
       res.json({ accessToken, refreshToken, user });
     } catch (err) {
@@ -92,9 +93,13 @@ module.exports = (redisClient) => {
         logger.warn('auth', 'login_failed_credentials', { requestId: req.requestId });
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+      if (user.is_banned) {
+        return res.status(403).json({ error: 'Account is banned' });
+      }
       const accessToken = generateAccessToken(user);
       const refreshToken = generateRefreshToken();
       await storeRefreshToken(refreshToken, user.id);
+      pool.query('UPDATE users SET last_ip = $1 WHERE id = $2', [req.ip, user.id]).catch(() => {});
       logger.info('auth', 'login_success', { requestId: req.requestId, userId: user.id });
       res.json({ accessToken, refreshToken, user: { id: user.id, username: user.username, display_name: user.display_name } });
     } catch (err) {

@@ -32,7 +32,7 @@ function setupSocket(io, onlineUsers, redisClient) {
     }
   }
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
       logger.warn('websocket', 'auth_no_token');
@@ -40,9 +40,17 @@ function setupSocket(io, onlineUsers, redisClient) {
     }
     try {
       socket.user = jwt.verify(token, process.env.JWT_SECRET);
+      const banned = await pool.query(
+        'SELECT is_banned FROM users WHERE id = $1',
+        [socket.user.id]
+      );
+      if (banned.rows[0]?.is_banned) {
+        return next(new Error('Banned'));
+      }
       logger.debug('websocket', 'auth_success', { userId: socket.user.id });
       next();
-    } catch {
+    } catch (err) {
+      if (err.message === 'Banned') return next(err);
       logger.warn('websocket', 'auth_invalid_token');
       next(new Error('Invalid token'));
     }

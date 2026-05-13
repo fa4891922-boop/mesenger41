@@ -21,6 +21,7 @@ const setupSocket = require('./socket');
 const logger = require('./diagnostics/logger');
 const requestId = require('./middleware/requestId');
 const apiLogger = require('./middleware/apiLogger');
+const banCheck = require('./middleware/banCheck');
 
 const MOBILE_ORIGINS = ['https://localhost', 'http://localhost', 'capacitor://localhost', 'ionic://localhost'];
 const configuredOrigins = (process.env.FRONTEND_URL || '')
@@ -36,11 +37,13 @@ const corsOrigin = configuredOrigins.length === 0 || configuredOrigins.includes(
     };
 
 const app = express();
+app.set('trust proxy', true);
 app.use(helmet());
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '50kb' }));
 app.use(requestId);
 app.use(apiLogger);
+app.use(banCheck);
 
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
@@ -80,6 +83,7 @@ app.use('/api', require('./routes/conversations')(io, onlineUsers));
 app.use('/api', require('./routes/messages')(io, onlineUsers));
 app.use('/api', require('./routes/turn'));
 app.use('/api', require('./routes/keys'));
+app.use('/api', require('./routes/admin')(io, onlineUsers));
 app.use('/api', require('./routes/diagnostics')(io, onlineUsers, redisClient));
 
 setupSocket(io, onlineUsers, redisClient);
